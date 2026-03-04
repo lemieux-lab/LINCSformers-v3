@@ -1,7 +1,7 @@
 # version #2 :)
 
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
 
 using DataFrames, Dates, StatsBase, JLD2
 using LincsProject
@@ -14,9 +14,12 @@ include("../../src/save.jl")
 
 
 CUDA.device!(0)
+
 data_path = "data/lincs_untrt_data.jld2"
 dataset = "untrt"
-n_epochs = 10
+n_epochs = 1
+batch_size = 200
+lr = lr * 2
 
 start_time = now()
 
@@ -234,8 +237,8 @@ for epoch in ProgressBar(1:n_epochs)
     for start_idx in 1:batch_size:size(X_train_masked, 2)
         end_idx = min(start_idx + batch_size - 1, size(X_train_masked, 2))
 
-        x_idx_cpu = X_train_masked[:, start_idx:end_idx]
-        x_pca_cpu = batch_pca(x_idx_cpu, pca_train, MASK_ID)
+        x_clean_cpu = X_train[:, start_idx:end_idx]
+        x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
 
         x_gpu = gpu(X_train_masked[:, start_idx:end_idx])
         x_pca = gpu(x_pca_cpu)
@@ -255,8 +258,8 @@ for epoch in ProgressBar(1:n_epochs)
     for start_idx in 1:batch_size:size(X_test_masked, 2)
         end_idx = min(start_idx + batch_size - 1, size(X_test_masked, 2))
 
-        x_idx_cpu = X_test_masked[:, start_idx:end_idx]
-        x_pca_cpu = batch_pca(x_idx_cpu, pca_train, MASK_ID)
+        x_clean_cpu = X_test[:, start_idx:end_idx]
+        x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
 
         x_gpu = gpu(X_test_masked[:, start_idx:end_idx])
         x_pca = gpu(x_pca_cpu)

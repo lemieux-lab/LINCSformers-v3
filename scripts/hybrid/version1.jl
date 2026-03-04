@@ -1,7 +1,7 @@
 # version #1 :)
 
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
 
 using DataFrames, Dates, StatsBase, JLD2
 using LincsProject
@@ -16,7 +16,8 @@ CUDA.device!(0)
 
 data_path = "data/lincs_untrt_data.jld2"
 dataset = "untrt"
-n_epochs = 10
+n_epochs = 1
+batch_size = 42 #1hr per epoch w/ 42
 
 start_time = now()
 data = load(data_path)["filtered_data"]
@@ -147,20 +148,24 @@ struct Model{E,J,P,D,T,C}
     pos_dropout::D
     transformer::T
     classifier::C
+    use_pca_proj::Bool 
 end
+
+Flux.@functor Model (embedding, pca_proj, pos_encoder, pos_dropout, transformer, classifier) 
 
 function Model(;
     input_size::Int,
-    pca_dim::Int,
+    pca_dim::Int, 
     embed_dim::Int,
     n_layers::Int,
     n_classes::Int,
     n_heads::Int,
     hidden_dim::Int,
-    dropout_prob::Float64
+    dropout_prob::Float64,
+    use_pca_proj::Bool
     )
     embedding = Flux.Embedding(input_size => embed_dim)
-    pca_proj = Flux.Dense(pca_dim => embed_dim)
+    pca_proj = Flux.Dense(pca_dim => embed_dim) 
     pos_encoder = PosEnc(embed_dim, input_size + 1)
     pos_dropout = Flux.Dropout(dropout_prob)
     transformer = Flux.Chain(
@@ -171,20 +176,23 @@ function Model(;
         Flux.LayerNorm(embed_dim),
         Flux.Dense(embed_dim => n_classes)
         )
-    return Model(embedding, pca_proj, pos_encoder, pos_dropout, transformer, classifier)
+    return Model(embedding, pca_proj, pos_encoder, pos_dropout, transformer, classifier, use_pca_proj) 
 end
-
-Flux.@functor Model
 
 function (model::Model)(input, input_pca)
     embedded = model.embedding(input)
-    pca_embedded = model.pca_proj(input_pca)
+    encoded_seq = model.pos_encoder(embedded) 
 
-    pca_reshaped = reshape(pca_embedded, size(pca_embedded, 1), 1, size(pca_embedded, 2))
-    combined = cat(pca_reshaped, embedded, dims=2)
+    if model.use_pca_proj 
+        processed_pca = model.pca_proj(input_pca) 
+    else 
+        processed_pca = input_pca 
+    end 
 
-    encoded = model.pos_encoder(combined)
-    encoded_dropped = model.pos_dropout(encoded)
+    pca_reshaped = reshape(processed_pca, size(processed_pca, 1), 1, size(processed_pca, 2)) 
+    combined = cat(pca_reshaped, encoded_seq, dims=2) 
+
+    encoded_dropped = model.pos_dropout(combined) 
 
     transformed = model.transformer(encoded_dropped)
 
@@ -196,7 +204,7 @@ function (model::Model)(input, input_pca)
     return logits_output[:,2:end,:]
 end
 
-function loss(model::Model, x, x_pca, y, mode::String)
+function loss(model::Model, x, x_pca, y, n_classes::Int, mode::String) 
     logits = model(x, x_pca)
 
     logits_flat = reshape(logits, size(logits, 1), :) 
@@ -224,6 +232,8 @@ end
 gene_medians = vec(median(data.expr, dims=2)) .+ 1e-10
 X = rank_genes(data.expr, gene_medians)
 
+X = X[:, 1:10]
+
 n_features = size(X, 1) + 2
 n_classes = size(X, 1)
 n_genes = size(X, 1)
@@ -233,17 +243,22 @@ X_train, X_test, train_indices, test_indices = split_data(X, 0.2)
 X_train_masked, y_train_masked = mask_input(X_train, mask_ratio, -100, MASK_ID, false)
 X_test_masked, y_test_masked = mask_input(X_test, mask_ratio, -100, MASK_ID, false)
 
-pca_train = fit(PCA, Float32.(X_train); maxoutdim=embed_dim)
+raw_train = data.expr[:, train_indices] 
+raw_test = data.expr[:, test_indices] 
+
+pca_train = fit(PCA, Float32.(raw_train); maxoutdim=embed_dim) 
 
 model = Model(
     input_size=n_features,
+    pca_dim=embed_dim, 
     embed_dim=embed_dim,
-    pca_dim=embed_dim,
     n_layers=n_layers,
     n_classes=n_classes,
+    
     n_heads=n_heads,
     hidden_dim=hidden_dim,
-    dropout_prob=drop_prob
+    dropout_prob=drop_prob,
+    use_pca_proj=false #!#
 ) |> gpu
 
 opt = Flux.setup(Adam(lr), model)
@@ -263,17 +278,17 @@ for epoch in ProgressBar(1:n_epochs)
         end_idx = min(start_idx + batch_size - 1, size(X_train_masked, 2))
 
         x_idx_cpu = X_train_masked[:, start_idx:end_idx]
-        x_pca_cpu = batch_pca(x_idx_cpu, pca_train, MASK_ID)
+        raw_batch_cpu = raw_train[:, start_idx:end_idx] 
+        x_pca_cpu = predict(pca_train, raw_batch_cpu) 
 
         x_gpu = gpu(X_train_masked[:, start_idx:end_idx])
         x_pca = gpu(x_pca_cpu)
         y_gpu = gpu(y_train_masked[:, start_idx:end_idx])
         
         loss_val, grads = Flux.withgradient(model) do m
-            loss(m, x_gpu, x_pca, y_gpu, "train")
+            loss(m, x_gpu, x_pca, y_gpu, n_classes, "train") 
         end
         Flux.update!(opt, model, grads[1])
-        loss_val = loss(model, x_gpu, x_pca, y_gpu, "train")
         push!(epoch_losses, loss_val)
     end
     push!(train_losses, mean(epoch_losses))
@@ -284,13 +299,14 @@ for epoch in ProgressBar(1:n_epochs)
         end_idx = min(start_idx + batch_size - 1, size(X_test_masked, 2))
 
         x_idx_cpu = X_test_masked[:, start_idx:end_idx]
-        x_pca_cpu = batch_pca(x_idx_cpu, pca_train, MASK_ID)
+        raw_batch_cpu = raw_test[:, start_idx:end_idx] 
+        x_pca_cpu = predict(pca_train, raw_batch_cpu) 
 
         x_gpu = gpu(X_test_masked[:, start_idx:end_idx])
         x_pca = gpu(x_pca_cpu)
         y_gpu = gpu(y_test_masked[:, start_idx:end_idx])
 
-        test_loss_val, logits_masked, y_masked = loss(model, x_gpu, x_pca, y_gpu, "test")
+        test_loss_val, logits_masked, y_masked = loss(model, x_gpu, x_pca, y_gpu, n_classes, "test") 
         push!(test_epoch_losses, test_loss_val)
 
         if isempty(y_masked) continue end
