@@ -6,7 +6,7 @@ dataset = "trt"
 
 # params
 batch_size = 128
-n_epochs = 1
+n_epochs = 50
 embed_dim = 128
 drop_prob = 0.05
 lr = 0.001
@@ -28,9 +28,9 @@ latent_3 = 246
 
 # notes
 gpu_info = "smaug"
-additional_notes = "50ep run!"
+additional_notes = "5,20ep big finetuning run"
 
 # matrix types
-# const IntMatrix2DType = Union{Array{Int64}, CuArray{Int32, 2}, CuMatrix{Int64}, DenseCuMatrix{Int64}}
-# const Float32Matrix2DType = Union{Array{Float32}, CuArray{Float32, 2}}
-# const Float32Matrix3DType = Union{Array{Float32}, CuArray{Float32, 3}}
+const IntMatrix2DType = Union{Array{Int64}, CuArray{Int32, 2}, CuMatrix{Int64}, DenseCuMatrix{Int64}}
+const Float32Matrix2DType = Union{Array{Float32}, CuArray{Float32, 2}}
+const Float32Matrix3DType = Union{Array{Float32}, CuArray{Float32, 3}}

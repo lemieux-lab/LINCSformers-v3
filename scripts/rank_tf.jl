@@ -1,26 +1,43 @@
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+if Sys.ARCH == :aarch64 || Sys.ARCH == :arm64
+    Pkg.activate("/home/golem/scratch/chans/lincsv3/aarch64")
+else
+    Pkg.activate("/home/golem/scratch/chans/lincsv3")
+end
+Pkg.Registry.add(RegistrySpec(url="git@github.com:lemieux-lab/LabRegistry.git"))
+Pkg.instantiate()
 
 using DataFrames, Dates, StatsBase, JLD2
 using LincsProject
 using Flux, Random, ProgressBars, CUDA, Statistics, CairoMakie, LinearAlgebra
 
 include("../src/params.jl")
+include("../src/fxns.jl")
+include("../src/plot.jl")
+include("../src/save.jl")
 
 n_epochs = 50
+batch_size = 600 # does LR need to be increased wrt batchsize increase? 
+lr = lr * 6
+gpu_info = CUDA.name(device())
+additional_notes = "rtf 50ep run"
+
 
 CUDA.device!(0)
 
 start_time = now()
-data = load(data_path)["filtered_data"]
 
+data = load(data_path)["filtered_data"]
 gene_medians = vec(median(data.expr, dims=2)) .+ 1e-10
 X = rank_genes(data.expr, gene_medians)
+
+# X = X[:, 1:10]
 
 n_features = size(X, 1) + 2
 n_classes = size(X, 1)
 n_genes = size(X, 1)
 MASK_ID = n_genes + 1
+
 CLS_ID = n_genes + 2
 CLS_VECTOR = fill(CLS_ID, (1, size(X, 2)))
 X = vcat(CLS_VECTOR, X)
@@ -50,7 +67,7 @@ function PosEnc(embed_dim::Int, max_len::Int)
     return PosEnc(pe_matrix)
 end
 
-Flux.@functor PosEnc
+Flux.@layer PosEnc
 Flux.trainable(pe::PosEnc) = ()
 
 function (pe::PosEnc)(input::AbstractArray)
@@ -90,7 +107,7 @@ function Transf(
     return Transf(mha, att_dropout, att_norm, mlp, mlp_norm)
 end
 
-Flux.@functor Transf
+Flux.@layer Transf
 
 function (tf::Transf)(input) # input shape: embed_dim × seq_len × batch_size
     normed = tf.att_norm(input)
@@ -139,7 +156,7 @@ function Model(;
     return Model(embedding, pos_encoder, pos_dropout, transformer, classifier)
 end
 
-Flux.@functor Model
+Flux.@layer Model
 
 function (model::Model)(input)
     embedded = model.embedding(input)
@@ -165,49 +182,36 @@ model = Model(
 
 opt = Flux.setup(Adam(lr), model)
 
-#=
-loss: cross-entropy between the model’s predicted distribution and the true token at each masked position
-compute the loss by iterating over masked positions OR by using a mask in the loss function
-=#
 function loss(model::Model, x, y, mode::String)
-    logits = model(x)  # (n_classes, seq_len, batch_size)
-    logits_flat = reshape(logits, size(logits, 1), :) # (n_classes, seq_len*batch_size)
-    y_flat = vec(y) # (seq_len*batch_size) column vec
-    mask = y_flat .!= -100 # bit vec, where sum = n_masked
-    logits_masked = logits_flat[:, mask] # (n_classes, n_masked)
-    y_masked = y_flat[mask] # (n_masked) column vec
-    y_oh = Flux.onehotbatch(y_masked, 1:n_classes) # (n_classes, n_masked)
+    logits = model(x)  
+    logits_flat = reshape(logits, size(logits, 1), :) 
+    y_flat = vec(y) 
+    
+    mask = (y_flat .!= -100) .& (y_flat .<= n_classes) .& (y_flat .> 0)
 
     if mode == "train"
-        return Flux.logitcrossentropy(logits_masked, y_oh) 
+        y_safe = ifelse.(mask, y_flat, Int32(1)) 
+        y_oh = Flux.onehotbatch(y_safe, 1:n_classes) 
+        
+        all_losses = Flux.logitcrossentropy(logits_flat, y_oh, agg=identity)
+        
+        mask_f32 = reshape(Float32.(mask), 1, :)
+        
+        return sum(all_losses .* mask_f32) / (sum(mask_f32) + 1f-5)
     end
+    
     if mode == "test"
+        logits_masked = logits_flat[:, mask]
+        y_masked = y_flat[mask]
+        
+        if isempty(y_masked)
+            return NaN32, logits_masked, y_masked
+        end
+        
+        y_oh = Flux.onehotbatch(y_masked, 1:n_classes)
         return Flux.logitcrossentropy(logits_masked, y_oh), logits_masked, y_masked
     end
 end
-
-# function loss(model::Model, x, y, mode::String)
-#     logits = model(x)  
-#     logits_flat = reshape(logits, size(logits, 1), :) 
-#     y_flat = vec(y) 
-    
-#     mask = y_flat .!= -100 
-    
-#     if mode == "train"
-#         y_safe = ifelse.(mask, y_flat, Int32(1)) 
-#         y_oh = Flux.onehotbatch(y_safe, 1:n_classes) 
-#         all_losses = Flux.logitcrossentropy(logits_flat, y_oh, agg=identity)
-#         mask_f32 = Float32.(mask)
-#         return sum(all_losses .* mask_f32) / (sum(mask_f32) + 1f-5)
-#     end
-    
-#     if mode == "test"
-#         logits_masked = logits_flat[:, mask]
-#         y_masked = y_flat[mask]
-#         y_oh = Flux.onehotbatch(y_masked, 1:n_classes)
-#         return Flux.logitcrossentropy(logits_masked, y_oh), logits_masked, y_masked
-#     end
-# end
 
 train_losses = Float32[]
 test_losses = Float32[]
@@ -252,7 +256,8 @@ for epoch in ProgressBar(1:n_epochs)
         
         if epoch == n_epochs
             y_cpu_batch = cpu(y_gpu)
-            masked_indices_cartesian = findall(y_cpu_batch .!= -100)
+            #!#
+            masked_indices_cartesian = findall((y_cpu_batch .!= -100) .& (y_cpu_batch .<= n_classes) .& (y_cpu_batch .> 0))
             original_ranks_in_batch = [idx[1] for idx in masked_indices_cartesian]
         end
 
@@ -296,13 +301,13 @@ save_dir = joinpath("plots", dataset, "rank_tf", timestamp)
 mkpath(save_dir)
 
 plot_loss(n_epochs, train_losses, test_losses, save_dir, "logit-ce")
-plot_rank_error(n_epochs, test_rank_errors, save_dir)
-plot_boxplot(n_classes, all_trues, all_preds, save_dir)
-plot_hexbin(all_trues, all_preds, "gene id", save_dir)
-plot_prediction_error(all_original_ranks, all_prediction_errors, save_dir)
+# plot_rank_error(n_epochs, test_rank_errors, save_dir)
+# plot_boxplot(n_classes, all_trues, all_preds, save_dir)
+# plot_hexbin(all_trues, all_preds, "gene id", save_dir)
+# plot_prediction_error(all_original_ranks, all_prediction_errors, save_dir)
 
-avg_errors = plot_mean_prediction_error(all_original_ranks, all_prediction_errors, save_dir)
-cs, cp = plot_ranked_heatmap(all_trues, all_preds, save_dir, true)
+# avg_errors = plot_mean_prediction_error(all_original_ranks, all_prediction_errors, save_dir)
+# cs, cp = plot_ranked_heatmap(all_trues, all_preds, save_dir, true)
 
 log_model(model, save_dir)
 embeddings = get_profile_embeddings(X, model)
@@ -317,7 +322,7 @@ run_minutes = rem(total_minutes, 60)
 log_info(train_indices, test_indices, embeddings, n_epochs, 
                     train_losses, test_losses, all_preds, all_trues, 
                     all_original_ranks, all_prediction_errors, 
-                    avg_errors, X_test_masked, y_test_masked, X_test)
+                    nothing, X_test_masked, y_test_masked, X_test)
 
 
 log_tf_params(gpu_info, dataset, mask_ratio, batch_size, n_epochs, 

@@ -1,5 +1,7 @@
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
+Pkg.Registry.add(RegistrySpec(url="git@github.com:lemieux-lab/LabRegistry.git"))
+Pkg.instantiate()
 
 using LincsProject, DataFrames, Dates, StatsBase, JLD2, MLUtils
 using Flux, Random, ProgressBars, CUDA, Statistics, CairoMakie, LinearAlgebra
@@ -11,13 +13,16 @@ include("../src/save.jl")
 
 CUDA.device!(0)
 
-n_epochs = 50
+# n_epochs = 1
+batch_size = 128
 
 start_time = now()
 data = load(data_path)["filtered_data"]
 
+
 gene_medians = vec(median(data.expr, dims=2)) .+ 1e-10
 X = Matrix{Int32}(rank_genes(data.expr, gene_medians))
+# X = X[:, 1:10]
 
 n_features = size(X, 1) + 2
 n_classes = size(X, 1)
@@ -87,9 +92,9 @@ function Encoder(
     return Encoder(noise, embedding, compress)
 end
 
-Flux.@functor Encoder
+Flux.@layer Encoder
 
-function (enc::Encoder)(input::IntMatrix2DType)
+function (enc::Encoder)(input::AbstractMatrix)
     noised_indices, labels = enc.noise(input) 
     embedded = enc.embedding(noised_indices)
     # embedded_flat = Flux.flatten(embedded)
@@ -126,9 +131,9 @@ function Decoder(
     return Decoder(reconstruct, n_genes)
 end
 
-Flux.@functor Decoder
+Flux.@layer Decoder
 
-function (dec::Decoder)(input::Float32Matrix2DType)
+function (dec::Decoder)(input::AbstractMatrix)
     return dec.reconstruct(input)
 end
 
@@ -157,7 +162,7 @@ function Model(;
     return Model(encoder, decoder)
 end
 
-Flux.@functor Model
+Flux.@layer Model
 
 function (model::Model)(input::AbstractMatrix{Int32})
     latent, labels = model.encoder(input)
@@ -183,31 +188,28 @@ opt = Flux.setup(Adam(lr), model)
 function loss(model::Model, x, mode::String)
     logits_flat, labels = model(x) 
     labels_flat = vec(labels)
-    mask_locs = labels_flat .> 0
     
-    if count(mask_locs) == 0
-        return 0.0f0
-    end
+    mask_indices = findall(>(0), labels_flat)
+    
+    v_size = size(model.encoder.embedding.weight, 2)
+    logits_reshaped = reshape(logits_flat, v_size, :)
+    
+    logits_masked = logits_reshaped[:, mask_indices]
+    targets_actual = labels_flat[mask_indices]
 
-    targets = labels_flat[mask_locs]
-
-    vocab_size = size(model.encoder.embedding.weight, 2)
-    logits_reshaped = reshape(logits_flat, vocab_size, :)
-
-    logits_masked = logits_reshaped[:, mask_locs]
-    targets_oh = Flux.onehotbatch(targets, 1:vocab_size)
+    targets_oh = Flux.onehotbatch(targets_actual, 1:v_size)
     error = Flux.logitcrossentropy(logits_masked, targets_oh)
 
     if mode == "train"
         return error
     end
-    if mode == "test"
-        return error, cpu(logits_masked), cpu(targets)
-    end
+
+    return error, cpu(logits_masked), cpu(targets_actual)
 end
 
 train_losses = Float32[]
 test_losses = Float32[]
+
 test_rank_errors = Float32[]
 
 all_preds = Int32[] 

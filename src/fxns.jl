@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
 
 using Flux, CUDA, Random, OneHotArrays
 

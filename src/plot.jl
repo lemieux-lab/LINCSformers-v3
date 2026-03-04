@@ -1,15 +1,22 @@
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
 
 using JLD2, Dates, DataFrames, Statistics, CUDA, Flux, CairoMakie, StatsBase
 
-function plot_loss(n_epochs, train_losses, test_losses, save_dir, loss::String)
+function plot_loss(n_epochs, train_losses, test_losses, save_dir, loss::String, pt1::Bool=false, pt2::Bool=false)
     fig_loss = Figure(size = (800, 600))
     ax_loss = Axis(fig_loss[1, 1], xlabel="epoch", ylabel="loss ($loss)", title="train vs. test loss")
     lines!(ax_loss, 1:n_epochs, train_losses, label="train loss", linewidth=2)
     lines!(ax_loss, 1:n_epochs, test_losses, label="test loss", linewidth=2)
     axislegend(ax_loss, position=:rt)
-    save(joinpath(save_dir, "loss.png"), fig_loss)
+    
+    if pt1 == true
+        save(joinpath(save_dir, "pt1_loss.png"), fig_loss)
+    elseif pt2 == true
+        save(joinpath(save_dir, "pt2_loss.png"), fig_loss)
+    else
+        save(joinpath(save_dir, "loss.png"), fig_loss)
+    end
 end
 
 function plot_rank_error(n_epochs, test_rank_errors, save_dir)

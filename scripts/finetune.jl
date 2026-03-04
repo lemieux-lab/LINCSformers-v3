@@ -1,19 +1,23 @@
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
+Pkg.Registry.add(RegistrySpec(url="git@github.com:lemieux-lab/LabRegistry.git"))
+Pkg.instantiate()
 
 # can use /home/golem/scratch/chans/lincsv3/plots/untrt/rank_tf/2026-02-19_22-54; this is 10ep run on smaug
+# nohup julia scripts/finetune.jl > ft_untrt_check_feb26.log 2>&1 &
 
-using LincsProject, JLD2, Flux, Optimisers, ProgressBars, Statistics, CUDA
+using LincsProject, JLD2, Flux, Optimisers, ProgressBars, Statistics, CUDA, Dates
 
 include("../src/params.jl")
 include("../src/fxns.jl")
-# include("../src/plot.jl")
-# include("../src/save.jl")
+include("../src/plot.jl")
+include("../src/save.jl")
 
-data_path = "data/lincs_untrt_data.jld2"
-dataset = "untrt"
-batch_size = 42
+# data_path = "data/lincs_untrt_data.jld2"
+# dataset = "untrt"
+# batch_size = 100
 
+start_time = now()
 CUDA.device!(0)
 
 # pretrained model struct for reconstruction
@@ -37,7 +41,7 @@ function PosEnc(embed_dim::Int, max_len::Int)
     return PosEnc(pe_matrix)
 end
 
-Flux.@functor PosEnc
+Flux.@layer PosEnc
 Flux.trainable(pe::PosEnc) = ()
 
 function (pe::PosEnc)(input::AbstractArray)
@@ -77,7 +81,7 @@ function Transf(
     return Transf(mha, att_dropout, att_norm, mlp, mlp_norm)
 end
 
-Flux.@functor Transf
+Flux.@layer Transf
 
 function (tf::Transf)(input) # input shape: embed_dim × seq_len × batch_size
     normed = tf.att_norm(input)
@@ -126,7 +130,7 @@ function Model(;
     return Model(embedding, pos_encoder, pos_dropout, transformer, classifier)
 end
 
-Flux.@functor Model
+Flux.@layer Model
 
 function (model::Model)(input)
     embedded = model.embedding(input)
@@ -146,7 +150,7 @@ struct FTModel{P,H}
     head::H
 end
 
-Flux.@functor FTModel
+Flux.@layer FTModel
 
 function FTModel(pt_model;
     embed_dim::Int,
@@ -230,8 +234,6 @@ X_train, X_test, train_indices, test_indices = split_data(X_input, 0.2)
 y_train = y_oh[:, train_indices]
 y_test = y_oh[:, test_indices]
 
-
-
 dir = "/home/golem/scratch/chans/lincsv3/plots/untrt/rank_tf/2026-02-19_22-54"
 state = load("$dir/model_state.jld2")["model_state"]
 pt_model = Model(
@@ -261,7 +263,7 @@ function loss(model, x, y)
 end
 
 #= 
-TODO: train via:
+train via:
 
 pass input w/ labels to model; 
 classifier takes CLS token to make prediction; 
@@ -269,15 +271,14 @@ check against y labels;
 gradient updates weights inside classifier not tf;
 =#
 
-pt_epochs = 5
+pt1_epochs = 5
+pt1_train_losses = Float32[]
+pt1_test_losses = Float32[]
+pt1_preds = Int[]
+pt1_trues = Int[]
 
-train_losses = []
-test_losses = []
-all_preds = Int[]
-all_trues = Int[]
-
-for epoch in ProgressBar(1:pt_epochs)
-    epoch_losses = []
+for epoch in ProgressBar(1:pt1_epochs)
+    train_epoch_losses = Float32[]
     for start_idx in 1:batch_size:size(X_train, 2)
         end_idx = min(start_idx + batch_size - 1, size(X_train, 2))
 
@@ -288,9 +289,33 @@ for epoch in ProgressBar(1:pt_epochs)
             loss(m, x_gpu, y_gpu)
         end
         Flux.update!(opt, ft_model, grads[1])
-        loss_val = loss(ft_model, x_gpu, y_gpu)
-        push!(epoch_losses, loss_val)
+        train_loss_val = loss(ft_model, x_gpu, y_gpu)
+        push!(train_epoch_losses, train_loss_val)
     end
+    push!(pt1_train_losses, mean(train_epoch_losses))
+
+    test_epoch_losses = Float32[]
+
+    for start_idx in 1:batch_size:size(X_test, 2)
+        end_idx = min(start_idx + batch_size - 1, size(X_test, 2))
+
+        x_gpu = gpu(Int32.(X_test[:, start_idx:end_idx]))
+        y_gpu = gpu(Float32.(y_test[:, start_idx:end_idx]))
+
+        test_loss_val = loss(ft_model, x_gpu, y_gpu)
+        push!(test_epoch_losses, test_loss_val)
+
+        logits = ft_model(x_gpu)
+        test_loss_val = Flux.logitcrossentropy(logits, y_gpu)
+
+        if epoch == pt1_epochs
+            preds = Flux.onecold(cpu(logits))
+            trues = Flux.onecold(cpu(y_gpu))
+            append!(pt1_preds, preds)
+            append!(pt1_trues, trues)
+        end
+    end
+    push!(pt1_test_losses, mean(test_epoch_losses))
 end
 
 
@@ -298,26 +323,105 @@ Optimisers.thaw!(opt.pretrained)
 Optimisers.adjust!(opt, lr/10) 
 
 #=
-TODO: train again via:
+train again via:
 
 reduce learning rate
 gradient updates both transformer and classifier weights;
 =#
 
-ft_epochs = 20
-for epoch in ProgressBar(1:ft_epochs)
-    epoch_losses = Float32[]
+
+pt2_epochs = 20
+pt2_train_losses = Float32[]
+pt2_test_losses = Float32[]
+pt2_preds = Int[]
+pt2_trues = Int[]
+
+for epoch in ProgressBar(1:pt2_epochs)
+    train_epoch_losses = Float32[]
     for start_idx in 1:batch_size:size(X_train, 2)
         end_idx = min(start_idx + batch_size - 1, size(X_train, 2))
-        
+
         x_gpu = gpu(Int32.(X_train[:, start_idx:end_idx]))
         y_gpu = gpu(Float32.(y_train[:, start_idx:end_idx]))
-        
+
         lv, grads = Flux.withgradient(ft_model) do m
             loss(m, x_gpu, y_gpu)
         end
         Flux.update!(opt, ft_model, grads[1])
-        loss_val = loss(ft_model, x_gpu, y_gpu)
-        push!(epoch_losses, loss_val)
+        train_loss_val = loss(ft_model, x_gpu, y_gpu)
+        push!(train_epoch_losses, train_loss_val)
     end
+    push!(pt2_train_losses, mean(train_epoch_losses))
+
+    test_epoch_losses = Float32[]
+
+    for start_idx in 1:batch_size:size(X_test, 2)
+        end_idx = min(start_idx + batch_size - 1, size(X_test, 2))
+
+        x_gpu = gpu(Int32.(X_test[:, start_idx:end_idx]))
+        y_gpu = gpu(Float32.(y_test[:, start_idx:end_idx]))
+
+        test_loss_val = loss(ft_model, x_gpu, y_gpu)
+        push!(test_epoch_losses, test_loss_val)
+
+        logits = ft_model(x_gpu)
+        test_loss_val = Flux.logitcrossentropy(logits, y_gpu)
+
+        if epoch == pt2_epochs
+            preds = Flux.onecold(cpu(logits))
+            trues = Flux.onecold(cpu(y_gpu))
+            append!(pt2_preds, preds)
+            append!(pt2_trues, trues)
+        end
+    end
+    push!(pt2_test_losses, mean(test_epoch_losses))
+end
+
+
+# log stuff
+
+timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM")
+save_dir = joinpath("plots", dataset, "finetune", timestamp)
+mkpath(save_dir)
+
+log_model(ft_model, save_dir)
+plot_loss(pt1_epochs, pt1_train_losses, pt1_test_losses, save_dir, "logit-ce", true, false)
+plot_loss(pt2_epochs, pt2_train_losses, pt2_test_losses, save_dir, "logit-ce", false, true)
+
+jldsave(joinpath(save_dir, "pt1_losses.jld2"); 
+        epochs = 1:pt1_epochs, 
+        train_losses = pt1_train_losses, 
+        test_losses = pt1_test_losses
+)
+jldsave(joinpath(save_dir, "pt2_losses.jld2"); 
+        epochs = 1:pt2_epochs, 
+        train_losses = pt2_train_losses, 
+        test_losses = pt2_test_losses
+)
+jldsave(joinpath(save_dir, "pt1_predstrues.jld2"); 
+    all_preds = pt1_preds, 
+    all_trues = pt1_trues
+)
+jldsave(joinpath(save_dir, "pt2_predstrues.jld2"); 
+    all_preds = pt2_preds, 
+    all_trues = pt2_trues
+)
+
+end_time = now()
+run_time = end_time - start_time
+total_minutes = div(run_time.value, 60000)
+run_hours = div(total_minutes, 60)
+run_minutes = rem(total_minutes, 60)
+
+params_txt = joinpath(save_dir, "params.txt")
+open(params_txt, "w") do io
+    println(io, "PARAMETERS:")
+    println(io, "###########")
+    println(io, "gpu = $gpu_info")
+    println(io, "pt1_epochs = $pt1_epochs")
+    println(io, "pt2_epochs = $pt2_epochs")
+    println(io, "dataset = $dataset")
+    println(io, "batch_size = $batch_size")
+    println(io, "ADDITIONAL NOTES: $additional_notes")
+    println(io, "run_time = $(run_hours) hours and $(run_minutes) minutes")
 end

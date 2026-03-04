@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
 
 using JLD2, Dates, DataFrames, Statistics, CUDA, Flux
 
@@ -67,10 +67,12 @@ function log_info(train_indices, test_indices, profile_embeddings, n_epochs,
         original_rank = all_original_ranks, 
         prediction_error = all_prediction_errors
         )
-        jldsave(joinpath(save_dir, "avg_errors.jld2"); 
-            original_rank = avg_errors.original_rank,
-            avg_error = avg_errors.avg_error
-        )
+        if avg_errors !== nothing
+            jldsave(joinpath(save_dir, "avg_errors.jld2"); 
+                original_rank = avg_errors.original_rank,
+                avg_error = avg_errors.avg_error
+            )
+        end
     end
 
 end
