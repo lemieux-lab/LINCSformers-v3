@@ -18,10 +18,10 @@ include("../src/save.jl")
 
 # run-specific settings
 n_epochs = 50
-batch_size = 64 # does LR need to be increased wrt batchsize increase? 
-# lr = lr * 6
+batch_size = 600 # does LR need to be increased wrt batchsize increase? 
+lr = lr * 5
 gpu_info = CUDA.name(device())
-additional_notes = "rtf 1ep run to test if working"
+additional_notes = "rtf 1ep run to test how long it takes"
 
 
 CUDA.device!(0)
@@ -32,7 +32,7 @@ data = load(data_path)["filtered_data"]
 gene_medians = vec(median(data.expr, dims=2)) .+ 1e-10
 X = rank_genes(data.expr, gene_medians)
 
-X = X[:, 1:100]
+# X = X[:, 1:100]
 
 n_features = size(X, 1) + 2
 n_classes = size(X, 1)
@@ -69,7 +69,7 @@ function PosEnc(embed_dim::Int, max_len::Int)
 end
 
 Flux.@layer PosEnc
-Flux.trainable(pe::PosEnc) = ()
+Flux.trainable(pe::PosEnc) = NamedTuple()
 
 function (pe::PosEnc)(input::AbstractArray)
     seq_len = size(input,2)

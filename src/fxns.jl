@@ -39,7 +39,11 @@ end
 
 function mask_input(X::Matrix, mask_ratio::Float64, mask_val, mask_id, offset::Bool=false)
     X_masked = copy(X)
-    mask_labels = fill(Int32(mask_val), size(X)) 
+    if typeof(mask_val) == Float32
+        mask_labels = fill(Float32(mask_val), size(X)) 
+    else
+        mask_labels = fill(Int32(mask_val), size(X)) 
+    end
     n_rows, n_samples = size(X)
 
     if offset

@@ -1,11 +1,11 @@
 using Flux, ProgressBars
 
-function loss(model, x, y)
+function ce_loss(model, x, y)
     logits = model(x)
     return Flux.logitcrossentropy(logits, y)
 end
 
-function train(epochs, train_losses, test_losses, preds, trues)
+function train(epochs, train_losses, test_losses, preds, trues, loss)
     for epoch in ProgressBar(1:epochs)
         train_epoch_losses = Float32[]
         for start_idx in 1:batch_size:size(X_train, 2)

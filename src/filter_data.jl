@@ -61,3 +61,25 @@ loaded_all_data = load_lincs(all_file)
 
 # csv_lincs(lincs_data, untreated_data.expr, untreated_data, "data/cellline_geneexpr.csv")
 # csv_lincs(lincs_data, all_data.expr, all_data, "data/all_cellline_geneexpr.csv")
+
+#=
+for reference:
+    
+julia> data.compound.
+canonical_smiles
+first_name
+inchi_key
+pert_id
+
+julia> data.inst.
+bead_batch      build_name      cell_iname      cell_mfc_name   cmap_name       count_cv
+count_mean      det_plate       det_well        dyn_range       failure_mode    inv_level_10
+nearest_dose    pert_dose       pert_dose_unit  pert_id         pert_idose      pert_itime
+pert_mfc_id     pert_time       pert_time_unit  pert_type       project_code    qc_f_logp
+qc_iqr          qc_pass         qc_slope        rna_plate       rna_well        sample_id
+
+julia> data.gene.
+ensembl_id     feature_space
+gene_id        gene_symbol
+gene_title     gene_type
+=#

@@ -10,6 +10,7 @@ include("../../src/params.jl")
 include("../../src/fxns.jl")
 include("../../src/plot.jl")
 include("../../src/save.jl")
+include("train.jl")
 
 # settings
 
@@ -108,7 +109,7 @@ pt1_test_losses = Float32[]
 pt1_preds = Int[]
 pt1_trues = Int[]
 
-train(pt1_epochs, pt1_train_losses, pt1_test_losses, pt1_preds, pt1_trues)
+train(pt1_epochs, pt1_train_losses, pt1_test_losses, pt1_preds, pt1_trues, ce_loss)
 
 # pt2: gradient updates both transformer and classifier weights
 
@@ -121,7 +122,7 @@ pt2_test_losses = Float32[]
 pt2_preds = Int[]
 pt2_trues = Int[]
 
-train(pt2_epochs, pt2_train_losses, pt2_test_losses, pt2_preds, pt2_trues)
+train(pt2_epochs, pt2_train_losses, pt2_test_losses, pt2_preds, pt2_trues, ce_loss)
 
 # log stuff
 
