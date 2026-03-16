@@ -1,3 +1,5 @@
+### see Mar 15, 2026 note in Tokenizer Comparison; will revisit this later if needed
+
 using Pkg
 Pkg.activate("/home/golem/scratch/chans/lincsv3")
 Pkg.instantiate()

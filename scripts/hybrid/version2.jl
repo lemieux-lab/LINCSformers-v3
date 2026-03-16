@@ -23,11 +23,11 @@ CUDA.device!(0)
 # run-specific settings
 # data_path = "data/lincs_untrt_data.jld2"
 # dataset = "untrt"
-n_epochs = 50
+n_epochs = 5
 batch_size = 600 # 21 mins, 128 untrt
 lr = lr * 6
 gpu_info = CUDA.name(device())
-additional_notes = "first long run test"
+additional_notes = "testing 5ep because idk why the 50ep crashed"
 
 start_time = now()
 

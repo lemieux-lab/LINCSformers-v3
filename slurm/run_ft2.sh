@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=ft_lvl2_11_trt_v1
-#SBATCH --output=out/2026-03-12/%x.log
-#SBATCH --error=out/2026-03-12/%x.log
+#SBATCH --job-name=ft_lvl2_11_trt_rtf
+#SBATCH --output=out/2026-03-15/%x.log
+#SBATCH --error=out/2026-03-15/%x.log
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

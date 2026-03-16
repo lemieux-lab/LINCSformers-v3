@@ -1,18 +1,18 @@
 #!/bin/bash
 
-#SBATCH --job-name=v2_50_trt
-#SBATCH --output=out/2026-03-09/%x.log
-#SBATCH --error=out/2026-03-09/%x.log
+#SBATCH --job-name=v2_5_trt
+#SBATCH --output=out/2026-03-15/%x.log
+#SBATCH --error=out/2026-03-15/%x.log
 
 #SBATCH --partition=rhel9-aarch64
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=60
-#SBATCH --mem=500G
+#SBATCH --cpus-per-task=72
+#SBATCH --mem=600G
 
 #SBATCH --gres=gpu:GH200:1
-#SBATCH --time=4-00:00:00
+#SBATCH --time=1-00:00:00
 
 export JULIAUP_DEPOT_PATH="$HOME/.juliaup-aarch64"
 export JULIA_DEPOT_PATH="$HOME/.julia-aarch64" 

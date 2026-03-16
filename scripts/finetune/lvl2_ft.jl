@@ -17,10 +17,10 @@ include("train.jl")
 # settings
 
 level = "lvl2"
-modeltype = "v1"
+modeltype = "rtf"
 include("$(modeltype)_structs.jl")
 if modeltype == "rtf"
-    dir = "/home/golem/scratch/chans/lincsv3/plots/untrt/rank_tf/2026-02-19_22-54" #TODO: change after rtf finished running
+    dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rank_tf/2026-03-14_13-58"
 elseif modeltype == "v1"
     dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-11_10-42"
 elseif modeltype == "v2"
@@ -38,7 +38,9 @@ else
     error("check ur gpu!!!")
 end
 
-additional_notes = "ft 1ep test on multiclass (pert_id)"
+pt1_epochs = 1
+pt2_epochs = 1
+additional_notes = "1ep test for rtf"
 
 # if testing
 # data_path = "data/lincs_untrt_data.jld2"
@@ -103,7 +105,6 @@ opt = Flux.setup(Optimisers.Adam(lr), ft_model)
 
 Optimisers.freeze!(opt.pretrained) 
 
-pt1_epochs = 1
 pt1_train_losses = Float32[]
 pt1_test_losses = Float32[]
 pt1_preds = Int[]
@@ -116,7 +117,6 @@ train(pt1_epochs, pt1_train_losses, pt1_test_losses, pt1_preds, pt1_trues, ce_lo
 Optimisers.thaw!(opt.pretrained)
 Optimisers.adjust!(opt, lr/10) 
 
-pt2_epochs = 1
 pt2_train_losses = Float32[]
 pt2_test_losses = Float32[]
 pt2_preds = Int[]
