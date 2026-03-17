@@ -1,6 +1,3 @@
-# downstream task: prediction of perturbation (multi-class classification)
-    # easier version would be treated vs. untreated profile via pert_type
-
 using Pkg
 Pkg.activate("/home/golem/scratch/chans/lincsv3")
 #TODO: likely don't need aarch64 config here because its kinda deezed for this task?
@@ -16,7 +13,7 @@ include("train.jl")
 
 # settings
 
-level = "lvl2"
+level = "lvl3"
 modeltype = "rtf"
 include("$(modeltype)_structs.jl")
 if modeltype == "rtf"
@@ -40,7 +37,7 @@ end
 
 pt1_epochs = 1
 pt2_epochs = 1
-additional_notes = "1ep test for rtf"
+additional_notes = "tryign first lvl3"
 
 # if testing
 # data_path = "data/lincs_untrt_data.jld2"
@@ -52,10 +49,24 @@ CUDA.device!(0)
 data = load(data_path)["filtered_data"]
 
 X = data.expr 
-y = data.inst.pert_id # pert_type = trt vs untrt, pert_id = actual perturbation type
 
-#TODO: could probably also wrap all of this into a separate file 
-#TODO: OR just use one file for everything and dictate the labels via data.inst.$idk defined in sbatch?
+if level == "lvl1"
+    y = data.inst.cell_mfc_name # or is it cell_iname?
+elseif level == "lvl2"
+    y = data.inst.pert_id # pert_type = trt vs untrt, pert_id = actual perturbation type
+elseif level == "lvl3"
+    y = nothing # TODO: what even is this task
+
+    # y = load("ifkiksdglksjhgkshg/lincs_trt_untrt_inferred.jld2")["y_target"]
+    # n_classifications = size(y, 1) # or should this be unique is ok? this is not acc classification tho
+    # # TODO: FOR THIS STUFF............... NEED TO ADD SEPARATE CHECK FOR REGRESSION VS CLASSIFICATION!!!
+    # y_target = Float32.(y)
+    # loss_function = Flux.mse 
+    
+else
+    error("level undefined so y labels are undefined :(")
+end
+
 labels = unique(y)
 n_classifications = length(labels)
 ids = Dict(l => i for (i, l) in enumerate(labels))
