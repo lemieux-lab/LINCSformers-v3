@@ -17,19 +17,28 @@ include("../../src/fxns.jl")
 include("../../src/plot.jl")
 include("../../src/save.jl")
 
-
-CUDA.device!(0)
-
 # run-specific settings
+
 # data_path = "data/lincs_untrt_data.jld2"
 # dataset = "untrt"
-n_epochs = 5
-batch_size = 600 # 21 mins, 128 untrt
-lr = lr * 6
+n_epochs = 25
+
 gpu_info = CUDA.name(device())
-additional_notes = "testing 5ep because idk why the 50ep crashed"
+if gpu_info == "NVIDIA GeForce GTX 1080 Ti"
+    batch_size = 42
+elseif gpu_info == "Tesla V100-SXM2-32GB"
+    batch_size = 128
+elseif gpu_info == "NVIDIA GH200 144G HBM3e"
+    batch_size = 600
+    lr = lr * 6
+else
+    error("check ur gpu!!!")
+end
+
+additional_notes = "slightly longer run w/ normalizing"
 
 start_time = now()
+CUDA.device!(0)
 
 
 ### model structure
@@ -113,9 +122,10 @@ function (tf::Transf)(input) # input shape: embed_dim × seq_len × batch_size
 end
 
 
-struct Model{E,J,P,D,T,C}
+struct Model{E,J,N,P,D,T,C}
     embedding::E
     pca_proj::J
+    pca_norm::N
     # cls_token::L
     pos_encoder::P
     pos_dropout::D
@@ -135,6 +145,7 @@ function Model(;
     )
     embedding = Flux.Embedding(input_size => embed_dim)
     pca_proj = Flux.Dense(pca_dim => embed_dim)
+    pca_norm = Flux.LayerNorm(embed_dim)
     # cls_token = Flux.Embedding(1 => embed_dim)
     pos_encoder = PosEnc(embed_dim, input_size)
     pos_dropout = Flux.Dropout(dropout_prob)
@@ -146,7 +157,7 @@ function Model(;
         Flux.LayerNorm(embed_dim),
         Flux.Dense(embed_dim => n_classes)
         )
-    return Model(embedding, pca_proj, pos_encoder, pos_dropout, transformer, classifier)
+    return Model(embedding, pca_proj, pca_norm, pos_encoder, pos_dropout, transformer, classifier)
 end
 
 Flux.@layer Model
@@ -162,7 +173,10 @@ function (model::Model)(input, input_pca) # input: n,b input_pca: p,b
     # pca_reshaped = reshape(pca_embedded, size(pca_embedded, 1), 1, size(pca_embedded, 2))
     # combined = cat(hybrid_reshaped, embedded, dims=2) # e,n+1,b
 
-    pca_reshaped = reshape(pca_embedded, size(pca_embedded, 1), 1, size(pca_embedded, 2)) # e,1,b
+    pca_normed = model.pca_norm(pca_embedded)
+
+    pca_reshaped = reshape(pca_normed, size(pca_normed, 1), 1, size(pca_normed, 2)) # e,1,b
+    # pca_reshaped = reshape(pca_embedded, size(pca_embedded, 1), 1, size(pca_embedded, 2)) # e,1,b
     combined = embedded .+ pca_reshaped # e,n,b
 
     encoded = model.pos_encoder(combined) # e,n+1,b
@@ -218,7 +232,7 @@ end
 
 
 data = load(data_path)["filtered_data"]
-data_expr = data.expr#[:, 1:10]
+data_expr = data.expr
 gene_medians = vec(median(data_expr, dims=2)) .+ 1e-10
 X = rank_genes(data_expr, gene_medians)
 
@@ -227,16 +241,16 @@ n_classes = size(X, 1)
 n_genes = size(X, 1)
 MASK_ID = (n_classes + 1)
 
-X_train, X_test, train_indices, test_indices = split_data(X, 0.2)
-X_train_masked, y_train_masked = mask_input(X_train, mask_ratio, -100, MASK_ID, false)
-X_test_masked, y_test_masked = mask_input(X_test, mask_ratio, -100, MASK_ID, false)
+X_train, X_test, train_indices, test_indices = split_data(X, 0.2);
+X_train_masked, y_train_masked = mask_input(X_train, mask_ratio, -100, MASK_ID, false);
+X_test_masked, y_test_masked = mask_input(X_test, mask_ratio, -100, MASK_ID, false);
 
-pca_train = fit(PCA, Float32.(X_train); maxoutdim=embed_dim)
+pca_train = fit(PCA, Float32.(X_train); maxoutdim=embed_dim);
 
 model = Model(
     input_size=n_features,
     embed_dim=embed_dim,
-    pca_dim=embed_dim,
+    pca_dim=outdim(pca_train),
     n_layers=n_layers,
     n_classes=n_classes,
     n_heads=n_heads,
@@ -256,12 +270,16 @@ all_original_ranks = Int[]
 all_prediction_errors = Int[]
 
 for epoch in ProgressBar(1:n_epochs)
+    Flux.trainmode!(model)
     epoch_losses = Float32[]
     for start_idx in 1:batch_size:size(X_train_masked, 2)
         end_idx = min(start_idx + batch_size - 1, size(X_train_masked, 2))
 
-        x_clean_cpu = X_train[:, start_idx:end_idx]
-        x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
+        # x_clean_cpu = X_train[:, start_idx:end_idx]
+        # x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
+
+        x_masked_cpu = X_train_masked[:, start_idx:end_idx] 
+        x_pca_cpu = batch_pca(x_masked_cpu, pca_train, MASK_ID)
 
         x_gpu = gpu(X_train_masked[:, start_idx:end_idx])
         x_pca = gpu(x_pca_cpu)
@@ -276,13 +294,17 @@ for epoch in ProgressBar(1:n_epochs)
     end
     push!(train_losses, mean(epoch_losses))
 
+    Flux.testmode!(model)
     test_epoch_losses = Float32[]
     epoch_rank_errors = Int[]
     for start_idx in 1:batch_size:size(X_test_masked, 2)
         end_idx = min(start_idx + batch_size - 1, size(X_test_masked, 2))
 
-        x_clean_cpu = X_test[:, start_idx:end_idx]
-        x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
+        # x_clean_cpu = X_test[:, start_idx:end_idx]
+        # x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
+
+        x_masked_cpu = X_test_masked[:, start_idx:end_idx] 
+        x_pca_cpu = batch_pca(x_masked_cpu, pca_train, MASK_ID)
 
         x_gpu = gpu(X_test_masked[:, start_idx:end_idx])
         x_pca = gpu(x_pca_cpu)

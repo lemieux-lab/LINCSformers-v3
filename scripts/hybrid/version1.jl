@@ -27,7 +27,7 @@ n_epochs = 50
 batch_size = 600 # 1.5hr/epoch w/ 42 on untrt, 20mins/epoch w/ 600 on untrt
 lr = lr * 6
 gpu_info = CUDA.name(device())
-additional_notes = "first long run test"
+additional_notes = "first long run test WITH PCA_PROJ!!!"
 
 start_time = now()
 data = load(data_path)["filtered_data"]
@@ -253,7 +253,7 @@ model = Model(
     n_heads=n_heads,
     hidden_dim=hidden_dim,
     dropout_prob=drop_prob,
-    use_pca_proj=false #!#
+    use_pca_proj=true
 ) |> gpu
 
 opt = Flux.setup(Adam(lr), model)
