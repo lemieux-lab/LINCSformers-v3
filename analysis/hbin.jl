@@ -1,17 +1,21 @@
 # for reformatting heatmaps/hexbins after running model
+# TODO: need to clean this up a bit
 
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincs")
+Pkg.activate("/home/golem/scratch/chans/lincsv3")
 
-using JLD2, CairoMakie, StatsBase
+using JLD2, CairoMakie, StatsBase, StatisticalMeasures, CategoricalArrays
 
-all_trues = load("/home/golem/scratch/chans/lincsv3/plots/untrt/rank_tf/2026-02-19_22-54/predstrues.jld2")["all_trues"]
-all_preds = load("/home/golem/scratch/chans/lincsv3/plots/untrt/rank_tf/2026-02-19_22-54/predstrues.jld2")["all_preds"]
+dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-11_10-42"
+all_trues = load("$dir/predstrues.jld2")["all_trues"]
+all_preds = load("$dir/predstrues.jld2")["all_preds"]
 
 cs = corspearman(all_trues, all_preds)
 cp = cor(all_trues, all_preds)
 
-# exp val
+
+
+# for exp val
 
 begin
     fig_hex = Figure(size = (800, 700))
@@ -33,7 +37,7 @@ print(cs)
 
 
 
-# rank id
+# for rank id
 
 # # to sort x axis
 sorted_indices_by_mean = load("/home/golem/scratch/chans/lincsv2/plots/untrt/infographs/sorted_gene_indices_by_exp.jld2")["sorted_indices_by_mean"]
@@ -56,10 +60,7 @@ begin
     Colorbar(fig_hm[1, 2], hm, label = "Count (log10)")
     display(fig_hm)
 end
-save_dir = "/home/golem/scratch/chans/lincsv3/plots/untrt/rank_tf/2026-02-19_22-54"
-save(joinpath(save_dir, "heatmap.png"), fig_hm)
-
-
+save("$dir/hmap.png", fig_hm)
 
 
 
@@ -89,22 +90,15 @@ begin
     Colorbar(fig_hm[1, 2], hm, label = "Count (log10)")
     display(fig_hm)
 end
-
-
-save_dir = "/home/golem/scratch/chans/lincsv3/plots/untrt/rank_nn/2026-01-14_15-26"
-save(joinpath(save_dir, "heatmap.png"), fig_hm)
-
-
+save("$dir/hmap.png", fig_hm)
 
 
 
 # for oh_rank_nn
 
-base_path = "/home/golem/scratch/chans/lincsv3/plots/untrt/oh_rank_nn/2026-01-14_11-23" 
-data = load(joinpath(base_path, "predstrues.jld2"))
-
-all_trues = data["all_trues"]
-all_preds = data["all_preds"]
+dir = "/home/golem/scratch/chans/lincsv3/plots/untrt/oh_rank_nn/2026-01-14_11-23" 
+all_trues = load("$dir/predstrues.jld2")["all_trues"]
+all_preds = load("$dir/predstrues.jld2")["all_preds"]
 
 cp = cor(Float64.(all_trues), Float64.(all_preds))
 max_id = maximum(vcat(all_trues, all_preds))
@@ -126,6 +120,117 @@ begin
     Colorbar(fig_hm[1, 2], hm, label = "Count (log10)")
     display(fig_hm)
 end
+save("$dir/hmap.png", fig_hm)
 
-save_dir = "/home/golem/scratch/chans/lincsv3/plots/untrt/oh_rank_nn/2026-01-14_11-23"
-save(joinpath(save_dir, "heatmap.png"), fig_hm)
+
+
+# for lvl 1 finetune
+
+dir = "/home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/rtf/2026-03-17_17-19"
+
+all_trues = load("$dir/pt2_predstrues_recovered.jld2")["all_trues"]
+all_preds = load("$dir/pt2_predstrues_recovered.jld2")["all_preds"]
+
+# finetune metricsc
+classes = union(unique(all_trues), unique(all_preds))
+y_true = categorical(all_trues, levels=classes)
+y_pred = categorical(all_preds, levels=classes)
+acc = accuracy(y_pred, y_true)
+f1 = macro_f1score(y_pred, y_true)
+# prec = multiclass_precision(y_pred, y_true) # not really sure if we need this
+cs = corspearman(all_trues, all_preds)
+cp = cor(all_trues, all_preds)
+
+bin_edges = 1:306
+h = fit(Histogram, (all_trues, all_preds), (bin_edges, bin_edges))
+begin
+    fig_hm = Figure(size = (400, 300))
+    ax_hm = Axis(fig_hm[1, 1],
+        xlabel = "True cell line",
+        ylabel = "Predicted cell line"
+    )
+
+    log10_weights = log10.(h.weights .+ 1)
+    hm = heatmap!(ax_hm, h.edges[1], h.edges[2], log10_weights)
+    text!(ax_hm, 15, 290, align = (:left, :top), text = "Acc: $(round(acc, digits=4))", color = :white)
+    text!(ax_hm, 15, 260, align = (:left, :top), text = "F1: $(round(f1, digits=4))", color = :white)
+    Colorbar(fig_hm[1, 2], hm, label = "Count (log10)")
+    display(fig_hm)
+end
+save("$dir/hmap.png", fig_hm)
+
+
+
+# for lvl 2 finetune
+
+dir = "/home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/v1/2026-03-17_11-11"
+all_trues = load("$dir/pt2_predstrues_recovered.jld2")["all_trues"]
+all_preds = load("$dir/pt2_predstrues_recovered.jld2")["all_preds"]
+
+# finetune metricsc
+classes = union(unique(all_trues), unique(all_preds))
+y_true = categorical(all_trues, levels=classes)
+y_pred = categorical(all_preds, levels=classes)
+acc = accuracy(y_pred, y_true)
+f1 = macro_f1score(y_pred, y_true)
+# prec = multiclass_precision(y_pred, y_true) # not really sure if we need this
+cs = corspearman(all_trues, all_preds)
+cp = cor(all_trues, all_preds)
+
+# true_counts = countmap(all_trues)
+# correct_counts = Dict{Int, Int}()
+# for (t, p) in zip(all_trues, all_preds)
+#     if t == p
+#         correct_counts[t] = get(correct_counts, t, 0) + 1
+#     end
+# end
+
+# classes = collect(keys(true_counts))
+# supports = [true_counts[c] for c in classes]
+# accuracies = [get(correct_counts, c, 0) / true_counts[c] for c in classes]
+
+# begin
+#     fig = Figure(size = (400, 300))
+#     ax = Axis(fig[1, 1], 
+#         xlabel = "Number of True Samples in Test Set (Log Scale)", 
+#         ylabel = "Accuracy (0.0 to 1.0)",
+#         xscale = log10)
+
+#     scatter!(ax, supports, accuracies, 
+#         markersize = 5, 
+#         color = (:darkblue, 0.4))
+#     display(fig)
+# end
+# # save("$dir/accuracy_vs_support.png", fig)
+
+true_counts = countmap(all_trues)
+sorted_classes = sort(collect(true_counts), by=last, rev=true)
+top_classes = [k for (k, v) in sorted_classes[1:101]]
+class_to_idx = Dict(c => i for (i, c) in enumerate(top_classes))
+mapped_trues = Int[]
+mapped_preds = Int[]
+
+for (t, p) in zip(all_trues, all_preds)
+    if haskey(class_to_idx, t) && haskey(class_to_idx, p)
+        push!(mapped_trues, class_to_idx[t])
+        push!(mapped_preds, class_to_idx[p])
+    end
+end
+
+bin_edges = 1:101 
+h = fit(Histogram, (mapped_trues, mapped_preds), (bin_edges, bin_edges))
+begin
+    fig_hm = Figure(size = (400, 300))
+    ax_hm = Axis(fig_hm[1, 1],
+        xlabel = "True perturbation rank (1 = most frequent (:DMSO))",
+        ylabel = "Predicted perturbation rank",
+    )
+
+    log10_weights = log10.(h.weights .+ 1)
+    hm = heatmap!(ax_hm, h.edges[1], h.edges[2], log10_weights)
+    text!(ax_hm, 5, 95, align = (:left, :top), text = "Acc: $(round(acc, digits=4))", color = :white)
+    text!(ax_hm, 5, 85, align = (:left, :top), text = "F1: $(round(f1, digits=4))", color = :white)
+    Colorbar(fig_hm[1, 2], hm, label = "Count (log10)")
+    display(fig_hm)
+end
+save("$dir/hmap.png", fig_hm)
