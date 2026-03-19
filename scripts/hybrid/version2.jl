@@ -21,7 +21,7 @@ include("../../src/save.jl")
 
 # data_path = "data/lincs_untrt_data.jld2"
 # dataset = "untrt"
-n_epochs = 25
+n_epochs = 50
 
 gpu_info = CUDA.name(device())
 if gpu_info == "NVIDIA GeForce GTX 1080 Ti"
@@ -35,7 +35,7 @@ else
     error("check ur gpu!!!")
 end
 
-additional_notes = "slightly longer run w/ normalizing"
+additional_notes = "big 50ep run w/ normalization"
 
 start_time = now()
 CUDA.device!(0)
@@ -245,12 +245,30 @@ X_train, X_test, train_indices, test_indices = split_data(X, 0.2);
 X_train_masked, y_train_masked = mask_input(X_train, mask_ratio, -100, MASK_ID, false);
 X_test_masked, y_test_masked = mask_input(X_test, mask_ratio, -100, MASK_ID, false);
 
-pca_train = fit(PCA, Float32.(X_train); maxoutdim=embed_dim);
+raw_train = data_expr[:, train_indices];
+raw_test = data_expr[:, test_indices] ;
+
+raw_train_norm = StatsBase.zscore(Float32.(raw_train), 2)
+raw_test_norm = StatsBase.zscore(Float32.(raw_test), 2)
+
+# # alternatively if we want the zscore transform to be the same as the train so no leakage?
+# z_transform = fit(ZScoreTransform, Float32.(raw_train), dims=2)
+# raw_train_norm = StatsBase.transform(z_transform, Float32.(raw_train))
+# raw_test_norm = StatsBase.transform(z_transform, Float32.(raw_test))
+
+pca_train_norm = fit(PCA, Float32.(raw_train_norm); maxoutdim=embed_dim);
+
+# pca_train = fit(PCA, Float32.(raw_train); maxoutdim=embed_dim);
+
+# pca_train = fit(PCA, Float32.(X_train); maxoutdim=embed_dim);
+# n_pca_samples = min(50000, size(X_train, 2))
+# pca_subset = X_train[:, randperm(size(X_train, 2))[1:n_pca_samples]]
+# pca_train = fit(PCA, Float32.(pca_subset); maxoutdim=embed_dim);
 
 model = Model(
     input_size=n_features,
     embed_dim=embed_dim,
-    pca_dim=outdim(pca_train),
+    pca_dim=outdim(pca_train_norm),
     n_layers=n_layers,
     n_classes=n_classes,
     n_heads=n_heads,
@@ -259,6 +277,41 @@ model = Model(
 ) |> gpu
 
 opt = Flux.setup(Adam(lr), model)
+
+# # looking at the actual embeddings here
+# xb = raw_train_norm[:, 1:batch_size] # this is incorrect, it should be masked!
+# xpca = MultivariateStats.predict(pca_train_norm, xb)
+
+# xb_gpu = gpu(xb)
+# xpca_gpu = gpu(xpca)
+
+# # pass thru model
+# emb = model.embedding(xb_gpu)
+# pproj = model.pca_proj(xpca_gpu)
+
+# # with layernorm
+# pnorm = model.pca_norm(pproj)
+# pnorm_reshape = reshape(pnorm, size(pnorm, 1), 1, size(pnorm, 2))
+# pnorm_comb = emb .+ pnorm_reshape
+# pnorm_enc = model.pos_encoder(pnorm_comb)
+
+# # without layernorm
+# p_reshape = reshape(pproj, size(pproj, 1), 1, size(pproj, 2))
+# p_comb = emb .+ p_reshape
+# p_enc = model.pos_encoder(p_comb)
+
+# # without pca
+# enc = model.pos_encoder(emb)
+
+# # continuing (not important)
+# enc_drop = model.pos_dropout(enc)
+# trf = model.transformer(enc_drop)
+# lout = model.classifier(trf) 
+
+# println("emb: ", mean(emb), " and ", std(emb))
+# println("pproj: ", mean(pproj), " and ", std(pproj))
+# println("pnorm: ", mean(pnorm), " and ", std(pnorm))
+
 
 train_losses = Float32[]
 test_losses = Float32[]
@@ -278,18 +331,25 @@ for epoch in ProgressBar(1:n_epochs)
         # x_clean_cpu = X_train[:, start_idx:end_idx]
         # x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
 
-        x_masked_cpu = X_train_masked[:, start_idx:end_idx] 
-        x_pca_cpu = batch_pca(x_masked_cpu, pca_train, MASK_ID)
+        x_masked_cpu = X_train_masked[:, start_idx:end_idx]
+        x_gpu = gpu(x_masked_cpu)
+        
+        x_raw_masked = raw_train_norm[:, start_idx:end_idx]
+        x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
 
-        x_gpu = gpu(X_train_masked[:, start_idx:end_idx])
+        x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)
         x_pca = gpu(x_pca_cpu)
+
+        # x_pca_cpu = batch_pca(x_masked_cpu, pca_train, MASK_ID)
+        # x_pca = gpu(x_pca_cpu)
+
         y_gpu = gpu(y_train_masked[:, start_idx:end_idx])
         
         loss_val, grads = Flux.withgradient(model) do m
             train_loss(m, x_gpu, x_pca, y_gpu, n_classes)
         end
         Flux.update!(opt, model, grads[1])
-        # loss_val = loss(model, x_gpu, x_pca, y_gpu, "train")
+        loss_val = train_loss(model, x_gpu, x_pca, y_gpu, n_classes)
         push!(epoch_losses, loss_val)
     end
     push!(train_losses, mean(epoch_losses))
@@ -300,14 +360,15 @@ for epoch in ProgressBar(1:n_epochs)
     for start_idx in 1:batch_size:size(X_test_masked, 2)
         end_idx = min(start_idx + batch_size - 1, size(X_test_masked, 2))
 
-        # x_clean_cpu = X_test[:, start_idx:end_idx]
-        # x_pca_cpu = batch_pca(x_clean_cpu, pca_train, MASK_ID)
+        x_masked_cpu = X_test_masked[:, start_idx:end_idx]
+        x_gpu = gpu(x_masked_cpu)
+        
+        x_raw_masked = raw_test_norm[:, start_idx:end_idx]
+        x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
 
-        x_masked_cpu = X_test_masked[:, start_idx:end_idx] 
-        x_pca_cpu = batch_pca(x_masked_cpu, pca_train, MASK_ID)
-
-        x_gpu = gpu(X_test_masked[:, start_idx:end_idx])
+        x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)
         x_pca = gpu(x_pca_cpu)
+
         y_gpu = gpu(y_test_masked[:, start_idx:end_idx])
 
         test_loss_val, logits_masked, y_masked = test_loss(model, x_gpu, x_pca, y_gpu, n_classes)

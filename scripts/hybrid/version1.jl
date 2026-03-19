@@ -156,7 +156,7 @@ end
 
 function (model::Model)(input, input_pca)
     embedded = model.embedding(input)
-    encoded_seq = model.pos_encoder(embedded) 
+    # encoded_seq = model.pos_encoder(embedded) 
 
     if model.use_pca_proj 
         processed_pca = model.pca_proj(input_pca) 
@@ -165,7 +165,9 @@ function (model::Model)(input, input_pca)
     end 
 
     pca_reshaped = reshape(processed_pca, size(processed_pca, 1), 1, size(processed_pca, 2)) 
-    combined = cat(pca_reshaped, encoded_seq, dims=2) 
+    combined = cat(pca_reshaped, embedded, dims=2) 
+
+    encoded_seq = model.pos_encoder(combined)
 
     encoded_dropped = model.pos_dropout(combined) 
     transformed = model.transformer(encoded_dropped)
@@ -235,13 +237,18 @@ X_train, X_test, train_indices, test_indices = split_data(X, 0.2);
 X_train_masked, y_train_masked = mask_input(X_train, mask_ratio, -100, MASK_ID, false);
 X_test_masked, y_test_masked = mask_input(X_test, mask_ratio, -100, MASK_ID, false);
 
-y_train_masked = Int32.(y_train_masked);
-y_test_masked  = Int32.(y_test_masked);
-
 raw_train = data_expr[:, train_indices];
 raw_test = data_expr[:, test_indices] ;
 
-pca_train = fit(PCA, Float32.(raw_train); maxoutdim=embed_dim);
+raw_train_norm = StatsBase.zscore(Float32.(raw_train), 2)
+raw_test_norm = StatsBase.zscore(Float32.(raw_test), 2)
+
+# # alternatively if we want the zscore transform to be the same as the train so no leakage?
+# z_transform = fit(ZScoreTransform, Float32.(raw_train), dims=2)
+# raw_train_norm = StatsBase.transform(z_transform, Float32.(raw_train))
+# raw_test_norm = StatsBase.transform(z_transform, Float32.(raw_test))
+
+pca_train_norm = fit(PCA, Float32.(raw_train_norm); maxoutdim=embed_dim);
 
 model = Model(
     input_size=n_features,
@@ -269,46 +276,69 @@ all_prediction_errors = Int[]
 
 # function loop()
     for epoch in ProgressBar(1:n_epochs)
+        Flux.trainmode!(model)
         epoch_losses = Float32[]
         for start_idx in 1:batch_size:size(X_train_masked, 2)
             end_idx = min(start_idx + batch_size - 1, size(X_train_masked, 2))
 
-            raw_batch_cpu = Float32.(raw_train[:, start_idx:end_idx])
+            # raw_batch_cpu = Float32.(raw_train[:, start_idx:end_idx])
             
             # use this instead of below line when debugging using a subset of the data (less sampels than emebd_dim)
             # pca_out = predict(pca_train, raw_batch_cpu) 
             # x_pca_cpu = zeros(Float32, embed_dim, size(raw_batch_cpu, 2))
             # x_pca_cpu[1:size(pca_out, 1), :] .= pca_out
 
-            x_pca_cpu = predict(pca_train, raw_batch_cpu)
+            # x_pca_cpu = predict(pca_train, raw_batch_cpu)
 
-            x_gpu = gpu(X_train_masked[:, start_idx:end_idx])
+            # x_gpu = gpu(X_train_masked[:, start_idx:end_idx])
+            # x_pca = gpu(x_pca_cpu)
+
+            x_masked_cpu = X_train_masked[:, start_idx:end_idx]
+            x_gpu = gpu(x_masked_cpu)
+            
+            x_raw_masked = raw_train_norm[:, start_idx:end_idx]
+            x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
+
+            x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)
             x_pca = gpu(x_pca_cpu)
+
             y_gpu = gpu(y_train_masked[:, start_idx:end_idx])
             
             loss_val, grads = Flux.withgradient(model) do m
                 train_loss(m, x_gpu, x_pca, y_gpu, n_classes) 
             end
             Flux.update!(opt, model, grads[1])
+            loss_val = train_loss(model, x_gpu, x_pca, y_gpu, n_classes)
             push!(epoch_losses, loss_val)
         end
         push!(train_losses, mean(epoch_losses))
-
+        
+        Flux.testmode!(model)
         test_epoch_losses = Float32[]
         epoch_rank_errors = Int[]
         for start_idx in 1:batch_size:size(X_test_masked, 2)
             end_idx = min(start_idx + batch_size - 1, size(X_test_masked, 2))
 
-            raw_batch_cpu = Float32.(raw_test[:, start_idx:end_idx])
+            # raw_batch_cpu = Float32.(raw_test[:, start_idx:end_idx])
 
             # pca_out = predict(pca_train, raw_batch_cpu) 
             # x_pca_cpu = zeros(Float32, embed_dim, size(raw_batch_cpu, 2))
             # x_pca_cpu[1:size(pca_out, 1), :] .= pca_out
 
-            x_pca_cpu = predict(pca_train, raw_batch_cpu) 
+            # x_pca_cpu = predict(pca_train, raw_batch_cpu) 
 
-            x_gpu = gpu(X_test_masked[:, start_idx:end_idx])
+            # x_gpu = gpu(X_test_masked[:, start_idx:end_idx])
+            # x_pca = gpu(x_pca_cpu)
+
+            x_masked_cpu = X_test_masked[:, start_idx:end_idx]
+            x_gpu = gpu(x_masked_cpu)
+            
+            x_raw_masked = raw_test_norm[:, start_idx:end_idx]
+            x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
+
+            x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)
             x_pca = gpu(x_pca_cpu)
+
             y_gpu = gpu(y_test_masked[:, start_idx:end_idx])
 
             test_loss_val, logits_masked, y_masked = test_loss(model, x_gpu, x_pca, y_gpu, n_classes) 

@@ -12,7 +12,7 @@ function rank_genes(expr, medians)
     for j in 1:m
         unsorted_expr_col = view(expr, :, j)
         @. normalized_col = unsorted_expr_col / medians
-        sortperm!(sorted_ind_col, unsorted_expr_col, rev=true)
+        sortperm!(sorted_ind_col, normalized_col, rev=true)
         for i in 1:n
             data_ranked[i, j] = sorted_ind_col[i]
         end
