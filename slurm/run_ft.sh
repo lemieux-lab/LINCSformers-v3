@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=ft_lvl1_312_trt_rtf
-#SBATCH --output=out/2026-03-15/%x.log
-#SBATCH --error=out/2026-03-15/%x.log
+#SBATCH --output=out/2026-03-30/%x.log
+#SBATCH --error=out/2026-03-30/%x.log
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -15,4 +15,4 @@
 export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 cd /home/golem/scratch/chans/lincsv3
-julia scripts/finetuning/lvl1_ft.jl
+julia scripts/finetune/ft_main.jl

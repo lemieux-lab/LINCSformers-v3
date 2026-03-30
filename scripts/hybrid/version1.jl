@@ -21,13 +21,14 @@ include("../../src/save.jl")
 CUDA.device!(0)
 
 # run-specific settings
+
 # data_path = "data/lincs_untrt_data.jld2"
 # dataset = "untrt"
 n_epochs = 50
 batch_size = 600 # 1.5hr/epoch w/ 42 on untrt, 20mins/epoch w/ 600 on untrt
 lr = lr * 6
 gpu_info = CUDA.name(device())
-additional_notes = "first long run test WITH PCA_PROJ!!!"
+additional_notes = "big run w/o CLS, znorm + w/ fixed rank_genes(), pca_proj"
 
 start_time = now()
 data = load(data_path)["filtered_data"]
@@ -169,7 +170,7 @@ function (model::Model)(input, input_pca)
 
     encoded_seq = model.pos_encoder(combined)
 
-    encoded_dropped = model.pos_dropout(combined) 
+    encoded_dropped = model.pos_dropout(encoded_seq) 
     transformed = model.transformer(encoded_dropped)
     # cls = transformed[:,1,:]
     # logits_output = model.classifier(cls)
@@ -228,7 +229,7 @@ data_expr = data.expr#[:, 1:10]
 gene_medians = vec(median(data_expr, dims=2)) .+ 1e-10
 X = rank_genes(data_expr, gene_medians)
 
-n_features = size(X, 1) + 2
+n_features = size(X, 1) + 1
 n_classes = size(X, 1)
 n_genes = size(X, 1)
 MASK_ID = (n_classes + 1)
@@ -240,15 +241,16 @@ X_test_masked, y_test_masked = mask_input(X_test, mask_ratio, -100, MASK_ID, fal
 raw_train = data_expr[:, train_indices];
 raw_test = data_expr[:, test_indices] ;
 
-raw_train_norm = StatsBase.zscore(Float32.(raw_train), 2)
-raw_test_norm = StatsBase.zscore(Float32.(raw_test), 2)
+# raw_train_norm = StatsBase.zscore(Float32.(raw_train), 2)
+# raw_test_norm = StatsBase.zscore(Float32.(raw_test), 2)
 
 # # alternatively if we want the zscore transform to be the same as the train so no leakage?
 # z_transform = fit(ZScoreTransform, Float32.(raw_train), dims=2)
 # raw_train_norm = StatsBase.transform(z_transform, Float32.(raw_train))
 # raw_test_norm = StatsBase.transform(z_transform, Float32.(raw_test))
 
-pca_train_norm = fit(PCA, Float32.(raw_train_norm); maxoutdim=embed_dim);
+pca_train_norm = fit(PCA, Float32.(raw_train); maxoutdim=embed_dim); # THIS IS NOT NORMALIZED
+
 
 model = Model(
     input_size=n_features,
@@ -296,7 +298,8 @@ all_prediction_errors = Int[]
             x_masked_cpu = X_train_masked[:, start_idx:end_idx]
             x_gpu = gpu(x_masked_cpu)
             
-            x_raw_masked = raw_train_norm[:, start_idx:end_idx]
+            # x_raw_masked = raw_train_norm[:, start_idx:end_idx]
+            x_raw_masked = raw_train[:, start_idx:end_idx]
             x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
 
             x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)
@@ -333,7 +336,7 @@ all_prediction_errors = Int[]
             x_masked_cpu = X_test_masked[:, start_idx:end_idx]
             x_gpu = gpu(x_masked_cpu)
             
-            x_raw_masked = raw_test_norm[:, start_idx:end_idx]
+            x_raw_masked = raw_test[:, start_idx:end_idx]
             x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
 
             x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)

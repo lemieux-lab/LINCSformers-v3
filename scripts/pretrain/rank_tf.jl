@@ -4,29 +4,40 @@ if Sys.ARCH == :aarch64 || Sys.ARCH == :arm64
 else
     Pkg.activate("/home/golem/scratch/chans/lincsv3")
 end
-Pkg.Registry.add(RegistrySpec(url="git@github.com:lemieux-lab/LabRegistry.git"))
+# Pkg.Registry.add(RegistrySpec(url="git@github.com:lemieux-lab/LabRegistry.git"))
 Pkg.instantiate()
 
 using DataFrames, Dates, StatsBase, JLD2
 using LincsProject
 using Flux, Random, ProgressBars, CUDA, Statistics, CairoMakie, LinearAlgebra
 
-include("../src/params.jl")
-include("../src/fxns.jl")
-include("../src/plot.jl")
-include("../src/save.jl")
+include("../../src/params.jl")
+include("../../src/fxns.jl")
+include("../../src/plot.jl")
+include("../../src/save.jl")
 
 # run-specific settings
+
+# data_path = "data/lincs_untrt_data.jld2"
+# dataset = "untrt"
 n_epochs = 50
-batch_size = 600 # does LR need to be increased wrt batchsize increase? 
-lr = lr * 5
+
 gpu_info = CUDA.name(device())
-additional_notes = "rtf 1ep run to test how long it takes"
+if gpu_info == "NVIDIA GeForce GTX 1080 Ti"
+    batch_size = 42
+elseif gpu_info == "Tesla V100-SXM2-32GB"
+    batch_size = 128
+elseif gpu_info == "NVIDIA GH200 144G HBM3e"
+    batch_size = 600
+    lr = lr * 6
+else
+    error("check ur gpu!!!")
+end
 
-
-CUDA.device!(0)
+additional_notes = "big run w/o CLS w/ fixed rank_genes()"
 
 start_time = now()
+CUDA.device!(0)
 
 data = load(data_path)["filtered_data"]
 gene_medians = vec(median(data.expr, dims=2)) .+ 1e-10
@@ -34,14 +45,14 @@ X = rank_genes(data.expr, gene_medians)
 
 # X = X[:, 1:100]
 
-n_features = size(X, 1) + 2
+n_features = size(X, 1) + 1
 n_classes = size(X, 1)
 n_genes = size(X, 1)
 MASK_ID = n_genes + 1
 
-CLS_ID = n_genes + 2
-CLS_VECTOR = fill(CLS_ID, (1, size(X, 2)))
-X = vcat(CLS_VECTOR, X)
+# CLS_ID = n_genes + 2
+# CLS_VECTOR = fill(CLS_ID, (1, size(X, 2)))
+# X = vcat(CLS_VECTOR, X)
 
 X_train, X_test, train_indices, test_indices = split_data(X, 0.2)
 X_train_masked, y_train_masked = mask_input(X_train, mask_ratio, -100, MASK_ID, true)

@@ -35,7 +35,7 @@ else
     error("check ur gpu!!!")
 end
 
-additional_notes = "big 50ep run w/ normalization"
+additional_notes = "big run w/o CLS, znorm + w/ fixed rank_genes()"
 
 start_time = now()
 CUDA.device!(0)
@@ -248,15 +248,15 @@ X_test_masked, y_test_masked = mask_input(X_test, mask_ratio, -100, MASK_ID, fal
 raw_train = data_expr[:, train_indices];
 raw_test = data_expr[:, test_indices] ;
 
-raw_train_norm = StatsBase.zscore(Float32.(raw_train), 2)
-raw_test_norm = StatsBase.zscore(Float32.(raw_test), 2)
+# raw_train_norm = StatsBase.zscore(Float32.(raw_train), 2)
+# raw_test_norm = StatsBase.zscore(Float32.(raw_test), 2)
 
 # # alternatively if we want the zscore transform to be the same as the train so no leakage?
 # z_transform = fit(ZScoreTransform, Float32.(raw_train), dims=2)
 # raw_train_norm = StatsBase.transform(z_transform, Float32.(raw_train))
 # raw_test_norm = StatsBase.transform(z_transform, Float32.(raw_test))
 
-pca_train_norm = fit(PCA, Float32.(raw_train_norm); maxoutdim=embed_dim);
+pca_train_norm = fit(PCA, Float32.(raw_train); maxoutdim=embed_dim);
 
 # pca_train = fit(PCA, Float32.(raw_train); maxoutdim=embed_dim);
 
@@ -334,7 +334,7 @@ for epoch in ProgressBar(1:n_epochs)
         x_masked_cpu = X_train_masked[:, start_idx:end_idx]
         x_gpu = gpu(x_masked_cpu)
         
-        x_raw_masked = raw_train_norm[:, start_idx:end_idx]
+        x_raw_masked = raw_train[:, start_idx:end_idx]
         x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
 
         x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)
@@ -363,7 +363,7 @@ for epoch in ProgressBar(1:n_epochs)
         x_masked_cpu = X_test_masked[:, start_idx:end_idx]
         x_gpu = gpu(x_masked_cpu)
         
-        x_raw_masked = raw_test_norm[:, start_idx:end_idx]
+        x_raw_masked = raw_test[:, start_idx:end_idx]
         x_raw_masked[x_masked_cpu .== MASK_ID] .= 0.0f0
 
         x_pca_cpu = MultivariateStats.predict(pca_train_norm, x_raw_masked)

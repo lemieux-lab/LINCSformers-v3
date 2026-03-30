@@ -1,10 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=v1_50_trt
-#SBATCH --output=out/2026-03-08/%x.log
-#SBATCH --error=out/2026-03-08/%x.log
-
+#SBATCH --account=lemieux
 #SBATCH --partition=rhel9-aarch64
+
+#SBATCH --job-name=v1_50_trt_proj
+#SBATCH --output=out/2026-03-28/%x.log
+#SBATCH --error=out/2026-03-28/%x.log
 
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

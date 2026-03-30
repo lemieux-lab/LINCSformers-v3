@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=rtf_50_trt
-#SBATCH --output=out/2026-03-11/%x.log
-#SBATCH --error=out/2026-03-11/%x.log
+#SBATCH --output=out/2026-03-21/%x.log
+#SBATCH --error=out/2026-03-21/%x.log
 
 #SBATCH --partition=rhel9-aarch64
 
@@ -20,4 +20,4 @@ export PATH="$HOME/.juliaup-bin-aarch64/bin:$HOME/.local-aarch64/bin:$JULIAUP_DE
 export JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 cd /home/golem/scratch/chans/lincsv3
-julia scripts/rank_tf.jl
+julia scripts/pretrain/rank_tf.jl

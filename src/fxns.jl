@@ -65,7 +65,11 @@ function mask_input(X::Matrix, mask_ratio::Float64, mask_val, mask_id, offset::B
     return X_masked, mask_labels
 end
 
-function convert_exp_to_rank(X_test, all_trues, all_preds)
+function get_rank(value, reference_col)
+    return count(x -> x > value, reference_col) + 1
+end
+
+function convert_exp_to_rank(X_test, all_trues, all_preds, all_column_indices)
     reference_matrix = X_test 
     ranked_preds = similar(all_preds, Int)
     ranked_trues = similar(all_trues, Int)
