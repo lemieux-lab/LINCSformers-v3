@@ -1,6 +1,7 @@
+# main.jl
+
 using Pkg
 Pkg.activate("/home/golem/scratch/chans/lincsv3")
-#TODO: likely don't need aarch64 config here because its kinda deezed for this task?
 Pkg.instantiate()
 
 using LincsProject, JLD2, Flux, Optimisers, ProgressBars, Statistics, CUDA, Dates, cuDNN, StatsBase
@@ -13,22 +14,27 @@ include("train.jl")
 
 # settings
 
-level = "lvl2"
-modeltype = "rtf"
+level = "lvl1"
+modeltype = "mlp"
 pt1_epochs = 3
 pt2_epochs = 12
-additional_notes = "tryign first lvl1 w/ new model"
+additional_notes = "test"
+
+# setup
 
 use_pca = modeltype in ("v1", "v2")
 use_oversampling = level == "lvl2"
 
 include("$(modeltype)_structs.jl")
+
 if modeltype == "rtf"
     dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rank_tf/2026-03-24_02-55"
+elseif modeltype == "mlp"
+    dir = nothing
 elseif modeltype == "v1"
-    dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-11_10-42" #TODO: change after v1 finished running
+    dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-11_10-42"
 elseif modeltype == "v2"
-    dir = nothing #TODO: change after v2 finished running
+    dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v2/2026-03-31_08-46"
 else
     error("check ur modeltype!!! or add etf configurations")
 end
@@ -42,10 +48,6 @@ else
     error("check ur gpu!!!")
 end
 
-# if testing
-# data_path = "data/lincs_untrt_data.jld2"
-# dataset = "untrt
-
 start_time = now()
 CUDA.device!(0)
 
@@ -54,27 +56,20 @@ data = load(data_path)["filtered_data"]
 X = data.expr 
 
 if level == "lvl1"
-    y = data.inst.cell_mfc_name # or is it cell_iname?
-
+    y = data.inst.cell_mfc_name 
+    idx = 1:size(X, 2)
 elseif level == "lvl2"
-    y = data.inst.pert_id # pert_type = trt vs untrt, pert_id = actual perturbation type
+    y = data.inst.pert_id 
 
-    counts = countmap(y)
-    sorted = sort(collect(counts), by=last, rev=true)
-    top500 = [k for (k,v) in sorted[1:500]] |> Set
-    idx = findall(l -> l in top500, y)
-    X = X[:, idx] # 978 x 484067
+    cls = countmap(data.inst.pert_id)
+    fcls = filter(cls) do p
+        p.second > 500 && p.second < 20000
+    end |> Dict
+
+    labels = collect(keys(fcls)) |> Set
+    idx = findall(l -> l in labels, y)
+    X = X[:, idx] 
     y = y[idx]
-
-elseif level == "lvl3"
-    y = nothing # TODO: what even is this task
-
-    # y = load("ifkiksdglksjhgkshg/lincs_trt_untrt_inferred.jld2")["y_target"]
-    # n_classifications = size(y, 1) # or should this be unique is ok? this is not acc classification tho
-    # # TODO: FOR THIS STUFF............... NEED TO ADD SEPARATE CHECK FOR REGRESSION VS CLASSIFICATION!!!
-    # y_target = Float32.(y)
-    # loss_function = Flux.mse 
-    
 else
     error("level undefined so y labels are undefined :(")
 end
@@ -88,26 +83,37 @@ y_oh = Flux.onehotbatch(y_ids, 1:n_classifications)
 n_genes = size(X, 1) 
 n_classes_pt = n_genes
 n_features_pt = n_classes_pt + 1
-# CLS_ID = n_features_pt 
 
 gene_medians = vec(median(X, dims=2)) .+ 1e-10
 X_ranked = rank_genes(X, gene_medians)
 
-# CLS_VECTOR = fill(Int32(CLS_ID), (1, size(X_ranked, 2)))
-# X_input = vcat(CLS_VECTOR, X_ranked)
 
-# TODO: load in indices from pretraining
-X_train, X_test, train_indices, test_indices = split_data(X_ranked, 0.2)
-y_train = y_oh[:, train_indices]
-y_test = y_oh[:, test_indices]
+if modeltype == "mlp"
+    X_train, X_test, train_indices, test_indices = split_data(X_ranked, 0.2)
+    y_train = y_oh[:, train_indices]
+    y_test  = y_oh[:, test_indices]
+else
+    pt_indices = load(joinpath(dir, "indices.jld2"))
+    pt_train_indices = pt_indices["train_indices"]
+    pt_test_indices  = pt_indices["test_indices"]
 
-if use_pca
-    raw_train = X[:, train_indices]
-    raw_test = X[:, test_indices]
-    raw_train_norm = StatsBase.zscore(Float32.(raw_train), 2)
-    raw_test_norm = StatsBase.zscore(Float32.(raw_test), 2)
-    pca_train_norm = fit(PCA, Float32.(raw_train_norm); maxoutdim=embed_dim)
+    idx_dict = Dict(orig_i => new_i for (new_i, orig_i) in enumerate(idx))
+    train_indices = [idx_dict[i] for i in pt_train_indices if haskey(idx_dict, i)]
+    test_indices  = [idx_dict[i] for i in pt_test_indices if haskey(idx_dict, i)]
+
+    X_train = X_ranked[:, train_indices]
+    X_test  = X_ranked[:, test_indices]
+    y_train = y_oh[:, train_indices]
+    y_test  = y_oh[:, test_indices]
+
+    if use_pca
+        raw_train_pt = data.expr[:, pt_train_indices]
+        pca_train_norm = fit(PCA, Float32.(raw_train_pt); maxoutdim=embed_dim)
+        raw_train = X[:, train_indices]
+        raw_test = X[:, test_indices]
+    end
 end
+
 
 if use_oversampling
     y_train_labels = Flux.onecold(cpu(y_train))
@@ -124,31 +130,47 @@ function oversample_batch(class_dict, classes, b_size)
     return [rand(class_dict[rand(classes)]) for _ in 1:b_size]
 end
 
-state = load("$dir/model_state.jld2")["model_state"]
-general_model = (
-    input_size=n_features_pt,
-    embed_dim=embed_dim,
-    n_layers=n_layers,
-    n_classes=n_classes_pt,
-    n_heads=n_heads,
-    hidden_dim=hidden_dim,
-    dropout_prob=drop_prob)
 
-if modeltype == "rtf"
-    pt_model = Model(; general_model...) |> gpu
-elseif modeltype == "v1"
-    pt_model = Model(; general_model..., pca_dim=embed_dim, use_pca_proj=false) |> gpu
+if modeltype == "mlp"
+    ft_model = MLPModel(; 
+        input_size = n_genes,
+        hidden_dim = hidden_dim,
+        n_classifications = n_classifications,
+        drop_prob = drop_prob
+    ) |> gpu
+    
+    opt = Flux.setup(Optimisers.Adam(lr), ft_model)
+    
 else
-    error("modeltype not configured yet!")
-end
-Flux.loadmodel!(pt_model, state)
+    state = load("$dir/model_state.jld2")["model_state"]
+    general_model = (
+        input_size=n_features_pt,
+        embed_dim=embed_dim,
+        n_layers=n_layers,
+        n_classes=n_classes_pt,
+        n_heads=n_heads,
+        hidden_dim=hidden_dim,
+        dropout_prob=drop_prob)
 
-ft_model = FTModel(pt_model;
-    embed_dim=embed_dim,
-    hidden_dim=hidden_dim,
-    n_classifications=n_classifications
-) |> gpu
-opt = Flux.setup(Optimisers.Adam(lr), ft_model)
+    if modeltype == "rtf"
+        pt_model = Model(; general_model...) |> gpu
+    elseif modeltype == "v1"
+        pt_model = Model(; general_model..., pca_dim=embed_dim, use_pca_proj=false) |> gpu
+    elseif modeltype == "v2"
+        pt_model = Model(; general_model..., pca_dim=embed_dim) |> gpu
+    end
+    
+    Flux.loadmodel!(pt_model, state)
+
+    ft_model = FTModel(pt_model;
+        embed_dim=embed_dim,
+        hidden_dim=hidden_dim,
+        n_classifications=n_classifications
+    ) |> gpu
+    
+    opt = Flux.setup(Optimisers.Adam(lr), ft_model)
+end
+
 
 # pt1: gradient updates weights inside classifier not tf
 
@@ -219,15 +241,3 @@ open(params_txt, "w") do io
     println(io, "ADDITIONAL NOTES: $additional_notes")
     println(io, "run_time = $(run_hours) hours and $(run_minutes) minutes")
 end
-
-### explore: reduce number of classes
-
-cls = countmap(data.inst.pert_id)
-fcls = filter(cls) do p
-    p.second > 1000 && p.second < 20000
-end |> Dict
-
-sum(p -> p.second, fcls)
-
-df = DataFrame(k=collect(keys(fcls)), v=collect(values(fcls)))
-sort(df, :v)
