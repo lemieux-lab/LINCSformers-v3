@@ -9,7 +9,11 @@ function ce_loss(model, x, x_pca, y, use_pca)
     return Flux.logitcrossentropy(logits, y)
 end
 
-function train(epochs, train_losses, test_losses, preds, trues, loss_fn, use_oversampling, class_to_idx, avail_classes, use_pca, batch_size)
+function train(ft_model, opt, xtrain, ytrain, xtest, ytest,
+    epochs, train_losses, test_losses, preds, trues, loss_fn, 
+    use_oversampling, class_to_idx, avail_classes, use_pca, batch_size,
+    xpca_train=nothing, xpca_test=nothing
+    )
     for epoch in ProgressBar(1:epochs)
 
         iter = div(size(X_train, 2), batch_size)
@@ -32,13 +36,16 @@ function train(epochs, train_losses, test_losses, preds, trues, loss_fn, use_ove
                 batch_idx = start_idx:end_idx
             end
 
-            x_gpu = gpu(Int32.(X_train[:, batch_idx]))
-            y_gpu = gpu(Float32.(y_train[:, batch_idx]))
+            x_gpu = gpu(xtrain[:, batch_idx])
+            y_gpu = gpu(ytrain[:, batch_idx])
 
             if use_pca
-                raw_batch_cpu = raw_train_norm[:, batch_idx]
-                x_pca_cpu = MultivariateStats.predict(pca_train_norm, raw_batch_cpu)
-                x_pca = gpu(Float32.(x_pca_cpu))
+                # raw_batch_cpu = raw_train_norm[:, batch_idx]
+                # x_pca_cpu = MultivariateStats.predict(pca_train_norm, raw_batch_cpu)
+                # x_pca = gpu(Float32.(x_pca_cpu))
+
+                x_pca = gpu(xpca_train[:, batch_idx])
+
             else
                 x_pca = nothing
             end
@@ -57,16 +64,17 @@ function train(epochs, train_losses, test_losses, preds, trues, loss_fn, use_ove
         Flux.testmode!(ft_model)
         test_epoch_losses = Float32[]
 
-        for start_idx in 1:batch_size:size(X_test, 2)
-            end_idx = min(start_idx + batch_size - 1, size(X_test, 2))
+        for start_idx in 1:batch_size:size(xtest, 2)
+            end_idx = min(start_idx + batch_size - 1, size(xtest, 2))
 
-            x_gpu = gpu(Int32.(X_test[:, start_idx:end_idx]))
-            y_gpu = gpu(Float32.(y_test[:, start_idx:end_idx]))
+            x_gpu = gpu(xtest[:, start_idx:end_idx])
+            y_gpu = gpu(ytest[:, start_idx:end_idx])
 
             if use_pca
-                raw_batch_cpu = raw_test_norm[:, start_idx:end_idx]
-                x_pca_cpu = MultivariateStats.predict(pca_train_norm, raw_batch_cpu)
-                x_pca = gpu(Float32.(x_pca_cpu))
+                # raw_batch_cpu = raw_test_norm[:, start_idx:end_idx]
+                # x_pca_cpu = MultivariateStats.predict(pca_train_norm, raw_batch_cpu)
+                # x_pca = gpu(Float32.(x_pca_cpu))
+                x_pca = gpu(xpca_test[:, start_idx:end_idx])
                 logits = ft_model(x_gpu, x_pca)
             else
                 logits = ft_model(x_gpu)

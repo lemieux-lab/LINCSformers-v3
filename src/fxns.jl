@@ -96,3 +96,18 @@ function batch_pca(masked_idx, pca_train, mask_id)
 
     return pcatok
 end
+
+function extract_embeddings(pt_model, data_matrix, b_size)
+    Flux.testmode!(pt_model)
+    embeddings = []
+    
+    for i in 1:b_size:size(data_matrix, 2)
+        end_idx = min(i + b_size - 1, size(data_matrix, 2))
+        batch = gpu(Float32.(data_matrix[:, i:end_idx]))
+    
+        batch_embeds = cpu(pt_model(batch)) 
+        push!(embeddings, batch_embeds)
+    end
+    
+    return hcat(embeddings...)
+end

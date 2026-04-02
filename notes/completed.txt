@@ -1,0 +1,12 @@
+pre-training runs completed
+
+rtf: /home/golem/scratch/chans/lincsv3/plots/trt/rank_tf/2026-03-24_02-55
+v1: /home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-31_22-35
+v2: /home/golem/scratch/chans/lincsv3/plots/trt/rtf_v2/2026-03-31_08-46
+
+fine-tuning runs completed
+
+rtf: 
+v1: 
+v2: 
+mlp: 

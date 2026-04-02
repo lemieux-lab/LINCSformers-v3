@@ -1,4 +1,4 @@
-# main.jl
+# finetuning for transformers (full)
 
 using Pkg
 Pkg.activate("/home/golem/scratch/chans/lincsv3")
@@ -15,10 +15,10 @@ include("train.jl")
 # settings
 
 level = "lvl1"
-modeltype = "mlp"
-pt1_epochs = 3
-pt2_epochs = 12
-additional_notes = "test"
+modeltype = "v2"
+pt1_epochs = 5
+pt2_epochs = 20
+additional_notes = "proper indices and longer"
 
 # setup
 
@@ -29,10 +29,8 @@ include("$(modeltype)_structs.jl")
 
 if modeltype == "rtf"
     dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rank_tf/2026-03-24_02-55"
-elseif modeltype == "mlp"
-    dir = nothing
 elseif modeltype == "v1"
-    dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-11_10-42"
+    dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-31_22-35"
 elseif modeltype == "v2"
     dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v2/2026-03-31_08-46"
 else
@@ -87,33 +85,25 @@ n_features_pt = n_classes_pt + 1
 gene_medians = vec(median(X, dims=2)) .+ 1e-10
 X_ranked = rank_genes(X, gene_medians)
 
+pt_indices = load(joinpath(dir, "indices.jld2"))
+pt_train_indices = pt_indices["train_indices"]
+pt_test_indices  = pt_indices["test_indices"]
 
-if modeltype == "mlp"
-    X_train, X_test, train_indices, test_indices = split_data(X_ranked, 0.2)
-    y_train = y_oh[:, train_indices]
-    y_test  = y_oh[:, test_indices]
-else
-    pt_indices = load(joinpath(dir, "indices.jld2"))
-    pt_train_indices = pt_indices["train_indices"]
-    pt_test_indices  = pt_indices["test_indices"]
+idx_dict = Dict(orig_i => new_i for (new_i, orig_i) in enumerate(idx))
+train_indices = [idx_dict[i] for i in pt_train_indices if haskey(idx_dict, i)]
+test_indices  = [idx_dict[i] for i in pt_test_indices if haskey(idx_dict, i)]
 
-    idx_dict = Dict(orig_i => new_i for (new_i, orig_i) in enumerate(idx))
-    train_indices = [idx_dict[i] for i in pt_train_indices if haskey(idx_dict, i)]
-    test_indices  = [idx_dict[i] for i in pt_test_indices if haskey(idx_dict, i)]
+X_train = X_ranked[:, train_indices]
+X_test  = X_ranked[:, test_indices]
+y_train = y_oh[:, train_indices]
+y_test  = y_oh[:, test_indices]
 
-    X_train = X_ranked[:, train_indices]
-    X_test  = X_ranked[:, test_indices]
-    y_train = y_oh[:, train_indices]
-    y_test  = y_oh[:, test_indices]
-
-    if use_pca
-        raw_train_pt = data.expr[:, pt_train_indices]
-        pca_train_norm = fit(PCA, Float32.(raw_train_pt); maxoutdim=embed_dim)
-        raw_train = X[:, train_indices]
-        raw_test = X[:, test_indices]
-    end
+if use_pca
+    raw_train_pt = data.expr[:, pt_train_indices]
+    pca_train_norm = fit(PCA, Float32.(raw_train_pt); maxoutdim=embed_dim)
+    raw_train = X[:, train_indices]
+    raw_test = X[:, test_indices]
 end
-
 
 if use_oversampling
     y_train_labels = Flux.onecold(cpu(y_train))
@@ -131,46 +121,44 @@ function oversample_batch(class_dict, classes, b_size)
 end
 
 
-if modeltype == "mlp"
-    ft_model = MLPModel(; 
-        input_size = n_genes,
-        hidden_dim = hidden_dim,
-        n_classifications = n_classifications,
-        drop_prob = drop_prob
-    ) |> gpu
-    
-    opt = Flux.setup(Optimisers.Adam(lr), ft_model)
-    
-else
-    state = load("$dir/model_state.jld2")["model_state"]
-    general_model = (
-        input_size=n_features_pt,
-        embed_dim=embed_dim,
-        n_layers=n_layers,
-        n_classes=n_classes_pt,
-        n_heads=n_heads,
-        hidden_dim=hidden_dim,
-        dropout_prob=drop_prob)
+state = load("$dir/model_state.jld2")["model_state"]
+general_model = (
+    input_size=n_features_pt,
+    embed_dim=embed_dim,
+    n_layers=n_layers,
+    n_classes=n_classes_pt,
+    n_heads=n_heads,
+    hidden_dim=hidden_dim,
+    dropout_prob=drop_prob)
 
-    if modeltype == "rtf"
-        pt_model = Model(; general_model...) |> gpu
-    elseif modeltype == "v1"
-        pt_model = Model(; general_model..., pca_dim=embed_dim, use_pca_proj=false) |> gpu
-    elseif modeltype == "v2"
-        pt_model = Model(; general_model..., pca_dim=embed_dim) |> gpu
-    end
-    
-    Flux.loadmodel!(pt_model, state)
-
-    ft_model = FTModel(pt_model;
-        embed_dim=embed_dim,
-        hidden_dim=hidden_dim,
-        n_classifications=n_classifications
-    ) |> gpu
-    
-    opt = Flux.setup(Optimisers.Adam(lr), ft_model)
+if modeltype == "rtf"
+    pt_model = Model(; general_model...) |> gpu
+elseif modeltype == "v1"
+    pt_model = Model(; general_model..., pca_dim=embed_dim, use_pca_proj=false) |> gpu
+elseif modeltype == "v2"
+    pt_model = Model(; general_model..., pca_dim=embed_dim) |> gpu
 end
 
+Flux.loadmodel!(pt_model, state)
+
+ft_model = FTModel(pt_model;
+    embed_dim=embed_dim,
+    hidden_dim=hidden_dim,
+    n_classifications=n_classifications
+) |> gpu
+
+opt = Flux.setup(Optimisers.Adam(lr), ft_model)
+
+if use_pca
+    X_pca_train = Float32.(MultivariateStats.predict(pca_train_norm, Float32.(raw_train)))
+    X_pca_test  = Float32.(MultivariateStats.predict(pca_train_norm, Float32.(raw_test)))
+else
+    X_pca_train = nothing
+    X_pca_test = nothing
+end
+
+xtrain_full = Int32.(X_train)
+xtest_full  = Int32.(X_test)
 
 # pt1: gradient updates weights inside classifier not tf
 
@@ -181,19 +169,28 @@ pt1_test_losses = Float32[]
 pt1_preds = Int[]
 pt1_trues = Int[]
 
-train(pt1_epochs, pt1_train_losses, pt1_test_losses, pt1_preds, pt1_trues, ce_loss, use_oversampling, cidx_dict, cs, use_pca, batch_size)
-
+train(ft_model, opt, xtrain_full, y_train, xtest_full, y_test, 
+    pt1_epochs, pt1_train_losses, pt1_test_losses, pt1_preds, pt1_trues, ce_loss, 
+    use_oversampling, cidx_dict, cs, use_pca, batch_size, X_pca_train, X_pca_test
+)
 # pt2: gradient updates both transformer and classifier weights
 
 Optimisers.thaw!(opt.pretrained)
-Optimisers.adjust!(opt, lr/10) 
+if modeltype != "mlp"
+    Optimisers.adjust!(opt, lr/10) 
+end 
 
 pt2_train_losses = Float32[]
 pt2_test_losses = Float32[]
 pt2_preds = Int[]
 pt2_trues = Int[]
 
-train(pt2_epochs, pt2_train_losses, pt2_test_losses, pt2_preds, pt2_trues, ce_loss, use_oversampling, cidx_dict, cs, use_pca, batch_size)
+train(ft_model, opt, xtrain_full, y_train, xtest_full, y_test, 
+    pt2_epochs, pt2_train_losses, pt2_test_losses, pt2_preds, pt2_trues, ce_loss, 
+    use_oversampling, cidx_dict, cs, use_pca, batch_size, X_pca_train, X_pca_test
+)
+
+acc = sum(pt2_preds .== pt2_trues) / length(pt2_trues)
 
 # log stuff
 
@@ -219,7 +216,7 @@ jldsave(joinpath(save_dir, "pt1_predstrues.jld2");
 jldsave(joinpath(save_dir, "pt2_predstrues.jld2"); 
     all_preds = pt2_preds, 
     all_trues = pt2_trues)
-jldsave(joinpath(save_dir, "indices"); 
+jldsave(joinpath(save_dir, "indices.jld2"); 
     train = train_indices, 
     test = test_indices)
 
@@ -240,4 +237,5 @@ open(params_txt, "w") do io
     println(io, "batch_size = $batch_size")
     println(io, "ADDITIONAL NOTES: $additional_notes")
     println(io, "run_time = $(run_hours) hours and $(run_minutes) minutes")
+    println(io, "accuracy = $acc")
 end
