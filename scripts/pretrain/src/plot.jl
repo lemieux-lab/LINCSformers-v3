@@ -75,7 +75,7 @@ function plot_mean_prediction_error(all_original_ranks, all_prediction_errors, s
     return avg_errors
 end
 
-function plot_sorted_mean_rediction_error(avg_errors, all_original_ranks, all_prediction_errors, save_dir)
+function plot_sorted_mean_prediction_error(avg_errors, all_original_ranks, all_prediction_errors, save_dir)
     sorted_indices_by_mean = load("/home/golem/scratch/chans/lincs/plots/trt_and_untrt/infographs/sorted_gene_indices_by_exp.jld2")["sorted_indices_by_mean"]
     error_map = Dict(row.original_rank => row.avg_error for row in eachrow(avg_errors))
     sorted_mean_errors = [get(error_map, idx, 0) for idx in sorted_indices_by_mean]

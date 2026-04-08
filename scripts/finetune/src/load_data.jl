@@ -1,4 +1,4 @@
-using Random, StatsBase, Flux, MultivariateStats, Statistics
+using Random, StatsBase, Flux, MultivariateStats, Statistics, JLD2
 
 function rank_genes(expr, medians)
     n, m = size(expr)
@@ -37,7 +37,6 @@ function get_labels(data::Lincs, level::String)
         y = data.inst.pert_id
         counts = countmap(y)
         valid_labels = Set(k for (k, v) in counts if 500 < v < 20000)
-        
         idx = findall(l -> l in valid_labels, y)
         return X[:, idx], y[idx], idx
     else
@@ -45,8 +44,8 @@ function get_labels(data::Lincs, level::String)
     end
 end
 
-function dsplit(data::Lincs, level::String, modeltype::String)
-    X, y, orig_idx = get_labels(data, level)
+function dsplit(data::Lincs, config::Config)
+    X, y, orig_idx = get_labels(data, config.level)
     
     labels = unique(y)
     n_classifications = length(labels)
@@ -58,12 +57,11 @@ function dsplit(data::Lincs, level::String, modeltype::String)
     y_train, y_test = y_oh[:, train_indices], y_oh[:, test_indices]
 
     pca_info = nothing 
-
-    if modeltype != "mlp"
+    if config.modeltype != "mlp"
         gene_medians = vec(median(X, dims=2)) .+ 1e-10
         X_ranked = rank_genes(X, gene_medians)
 
-        pt_indices = load(joinpath(dir, "indices.jld2"))
+        pt_indices = load(joinpath(config.model_dir, "indices.jld2"))
         idx_dict = Dict(orig_i => new_i for (new_i, orig_i) in enumerate(orig_idx))
         
         train_indices = filter!(x -> !isnothing(x), [get(idx_dict, i, nothing) for i in pt_indices["train_indices"]])
@@ -72,15 +70,15 @@ function dsplit(data::Lincs, level::String, modeltype::String)
         X_train, X_test = X_ranked[:, train_indices], X_ranked[:, test_indices]
         y_train, y_test = y_oh[:, train_indices], y_oh[:, test_indices]
 
-        if use_pca
+        if config.modeltype in ("v1", "v2")
             raw_train = X[:, train_indices]
             raw_test = X[:, test_indices]
-            pca_train_norm = fit(PCA, Float32.(data.expr[:, pt_indices["train_indices"]]); maxoutdim=embed_dim)
+            pca_train_norm = fit(PCA, Float32.(data.expr[:, pt_indices["train_indices"]]); maxoutdim=config.embed_dim)
             pca_info = (norm=pca_train_norm, raw_train=raw_train, raw_test=raw_test)
         end
     end
 
-    cidx_dict, cs = use_oversmpl ? oversmpl(y_train) : (nothing, nothing)
+    cidx_dict, cs = (config.level == "lvl2") ? oversmpl(y_train) : (nothing, nothing)
 
     return X_train, X_test, y_train, y_test, train_indices, test_indices, n_genes, n_classifications, cidx_dict, cs, pca_info
 end
@@ -108,29 +106,29 @@ function get_pooled(m, x, x_pca, m_type)
     return dropdims(mean(transformed, dims=2), dims=2)
 end
 
-function emb(dir, modeltype, X_train, X_test, pca_info, use_pca, batch_size, n_genes, n_classifications)
-    if modeltype == "mlp"
+function emb(config::Config, X_train, X_test, pca_info, use_pca, n_genes, n_classifications)
+    if config.modeltype == "mlp"
         ft_model = Flux.Chain(
-            Flux.Dense(n_genes => hidden_dim, gelu),
-            Flux.LayerNorm(hidden_dim),
-            Flux.Dropout(drop_prob),
-            Flux.Dense(hidden_dim => n_classifications)
+            Flux.Dense(n_genes => config.hidden_dim, gelu),
+            Flux.LayerNorm(config.hidden_dim),
+            Flux.Dropout(config.drop_prob),
+            Flux.Dense(config.hidden_dim => n_classifications)
         ) |> gpu
         return ft_model, Float32.(X_train), Float32.(X_test)
     end
 
-    state = load(joinpath(dir, "model_state.jld2"))["model_state"]
+    state = load(joinpath(config.model_dir, "model_state.jld2"))["model_state"]
     general_model = (
-        input_size=n_genes + 1, embed_dim=embed_dim, n_layers=n_layers,
-        n_classes=n_genes, n_heads=n_heads, hidden_dim=hidden_dim, dropout_prob=drop_prob
+        input_size=n_genes + 1, embed_dim=config.embed_dim, n_layers=config.n_layers,
+        n_classes=n_genes, n_heads=config.n_heads, hidden_dim=config.hidden_dim, dropout_prob=config.drop_prob
     )
 
-    if modeltype == "rtf"
+    if config.modeltype == "rtf"
         pt_model = Model(; general_model...) |> gpu
-    elseif modeltype == "v1"
-        pt_model = Model(; general_model..., pca_dim=embed_dim, use_pca_proj=false) |> gpu
-    elseif modeltype == "v2"
-        pt_model = Model(; general_model..., pca_dim=embed_dim) |> gpu
+    elseif config.modeltype == "v1"
+        pt_model = Model(; general_model..., pca_dim=config.embed_dim, use_pca_proj=false) |> gpu
+    elseif config.modeltype == "v2"
+        pt_model = Model(; general_model..., pca_dim=config.embed_dim) |> gpu
     end
     
     Flux.loadmodel!(pt_model, state)
@@ -139,15 +137,15 @@ function emb(dir, modeltype, X_train, X_test, pca_info, use_pca, batch_size, n_g
     function extract_embeds(X_ranked, raw_data)
         embeds = []
         n_samples = size(X_ranked, 2)
-        for i in 1:batch_size:n_samples
-            b_idx = i:min(i+batch_size-1, n_samples)
+        for i in 1:config.batch_size:n_samples
+            b_idx = i:min(i+config.batch_size-1, n_samples)
             x_batch = gpu(Int32.(X_ranked[:, b_idx]))
             
             if use_pca && !isnothing(pca_info)
                 x_pca_batch = gpu(Float32.(MultivariateStats.predict(pca_info.norm, Float32.(raw_data[:, b_idx]))))
-                push!(embeds, cpu(get_pooled(pt_model, x_batch, x_pca_batch, modeltype)))
+                push!(embeds, cpu(get_pooled(pt_model, x_batch, x_pca_batch, config.modeltype)))
             else
-                push!(embeds, cpu(get_pooled(pt_model, x_batch, nothing, modeltype)))
+                push!(embeds, cpu(get_pooled(pt_model, x_batch, nothing, config.modeltype)))
             end
         end
         return hcat(embeds...)
@@ -157,62 +155,42 @@ function emb(dir, modeltype, X_train, X_test, pca_info, use_pca, batch_size, n_g
     test_input = extract_embeds(X_test, use_pca ? pca_info.raw_test : nothing)
 
     ft_model = Flux.Chain(
-        Flux.Dense(embed_dim => hidden_dim, gelu),
-        Flux.LayerNorm(hidden_dim),
-        Flux.Dropout(drop_prob),
-        Flux.Dense(hidden_dim => n_classifications)
+        Flux.Dense(config.embed_dim => config.hidden_dim, gelu),
+        Flux.LayerNorm(config.hidden_dim),
+        Flux.Dropout(config.drop_prob),
+        Flux.Dense(config.hidden_dim => n_classifications)
     ) |> gpu
 
     return ft_model, train_input, test_input
 end
 
-function oversmpl(y_train)
-    labels = Flux.onecold(cpu(y_train))
-    cidx_dict = Dict{Int, Vector{Int}}()
-    for (i, label) in enumerate(labels)
-        push!(get!(cidx_dict, label, Int[]), i)
-    end
-    return cidx_dict, collect(keys(cidx_dict))
-end
-
-function oversample_batch(class_dict, classes, b_size)
-    return [rand(class_dict[rand(classes)]) for _ in 1:b_size]
-end
-
-function mstate(dir)
-    state = load(joinpath(dir, "model_state.jld2"))["model_state"]
+function mstate(config::Config, pca_info, use_pca, n_classifications)
+    state = load(joinpath(config.model_dir, "model_state.jld2"))["model_state"]
     
     general_model = (
-        input_size=979,
-        embed_dim=embed_dim,
-        n_layers=n_layers,
-        n_classes=978,
-        n_heads=n_heads,
-        hidden_dim=hidden_dim,
-        dropout_prob=drop_prob
+        input_size=979, embed_dim=config.embed_dim, n_layers=config.n_layers,
+        n_classes=978, n_heads=config.n_heads, hidden_dim=config.hidden_dim, dropout_prob=config.drop_prob
     )
 
-    if modeltype == "rtf"
+    if config.modeltype == "rtf"
         pt_model = Model(; general_model...) |> gpu
-    elseif modeltype == "v1"
-        pt_model = Model(; general_model..., pca_dim=embed_dim, use_pca_proj=false) |> gpu
-    elseif modeltype == "v2"
-        pt_model = Model(; general_model..., pca_dim=embed_dim) |> gpu
-    else
-        error("Unknown modeltype: $modeltype")
+    elseif config.modeltype == "v1"
+        pt_model = Model(; general_model..., pca_dim=config.embed_dim, use_pca_proj=false) |> gpu
+    elseif config.modeltype == "v2"
+        pt_model = Model(; general_model..., pca_dim=config.embed_dim) |> gpu
     end
 
     Flux.loadmodel!(pt_model, state)
 
     ft_model = FTModel(pt_model;
-        embed_dim=embed_dim,
-        hidden_dim=hidden_dim,
+        embed_dim=config.embed_dim,
+        hidden_dim=config.hidden_dim,
         n_classifications=n_classifications
     ) |> gpu
 
-    if use_pca
-        X_pca_train = Float32.(MultivariateStats.predict(pca_train_norm, Float32.(raw_train)))
-        X_pca_test  = Float32.(MultivariateStats.predict(pca_train_norm, Float32.(raw_test)))
+    if use_pca && !isnothing(pca_info)
+        X_pca_train = Float32.(MultivariateStats.predict(pca_info.norm, Float32.(pca_info.raw_train)))
+        X_pca_test  = Float32.(MultivariateStats.predict(pca_info.norm, Float32.(pca_info.raw_test)))
     else
         X_pca_train = nothing
         X_pca_test = nothing

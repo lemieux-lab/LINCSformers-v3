@@ -1,12 +1,44 @@
 pre-training runs completed
 
-rtf: /home/golem/scratch/chans/lincsv3/plots/trt/rank_tf/2026-03-24_02-55
-v1: /home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-31_22-35
-v2: /home/golem/scratch/chans/lincsv3/plots/trt/rtf_v2/2026-03-31_08-46
+    rtf: /home/golem/scratch/chans/lincsv3/plots/trt/rank_tf/2026-03-24_02-55
+    v1: /home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-31_22-35
+    v2: /home/golem/scratch/chans/lincsv3/plots/trt/rtf_v2/2026-03-31_08-46
 
 fine-tuning runs completed
 
-rtf: 
-v1: 
-v2: 
-mlp: 
+level 1
+
+    with diff mlp (end2end)
+        
+        rtf: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/rtf/2026-04-05_16-05
+        v1: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/v1/2026-04-05_19-22
+        v2: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/v2/2026-04-05_17-23
+        mlp: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/mlp/2026-04-03_19-08
+
+    with same mlp (emb extract) *note: all tfs are overfitting a little after ~50-100ep
+
+        rtf: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/rtf/emb/2026-04-06_14-37
+        v1: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/v1/emb/2026-04-06_14-45
+        v2: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/v2/emb/2026-04-06_14-45
+        mlp: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl1/mlp/emb/2026-04-07_11-21
+
+level 2
+
+    with diff mlp (end2end)
+        
+        rtf: 
+        v1: 
+        v2: 
+        mlp: 
+
+    with same mlp (emb extract)
+
+        rtf: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/rtf/emb/2026-04-07_12-51
+        v1: 
+        v2: 
+        mlp: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/mlp/emb/2026-04-07_13-06
+
+
+
+example usage
+./slurm/finetune/sb_ft.sh e2e 1 lvl1 mlp trt test

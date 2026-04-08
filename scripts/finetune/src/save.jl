@@ -1,4 +1,4 @@
-using CairoMakie, JLD2
+using CairoMakie, JLD2, Flux
 
 function plot_loss(epochs, train_losses, test_losses, filepath)
     fig = Figure(size = (800, 600))
@@ -6,7 +6,6 @@ function plot_loss(epochs, train_losses, test_losses, filepath)
     lines!(ax, 1:epochs, train_losses, label="train loss", linewidth=2)
     lines!(ax, 1:epochs, test_losses, label="test loss", linewidth=2)
     axislegend(ax, position=:rt)
-    
     CairoMakie.save(filepath, fig) 
 end
 
@@ -27,7 +26,7 @@ function save_run(save_dir, model, epochs, train_idx, test_idx, train_loss, test
     
     idx_path = joinpath(save_dir, "indices.jld2")
     if !isfile(idx_path)
-        jldsave(idx_path; train = train_idx, test = test_idx)
+        jldsave(idx_path; train_indices = train_idx, test_indices = test_idx)
     end
 end
 

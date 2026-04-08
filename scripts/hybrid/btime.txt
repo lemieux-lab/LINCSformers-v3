@@ -1,3 +1,0 @@
-v1 as of mar6 commit
-29.068 s (5831872 allocations: 39.10 GiB) 
-

@@ -47,7 +47,7 @@ function train_epoch!(model, opt, X_train, ytrain, pca_train, loss,
     
     for i in 1:num_batches
         if use_oversmpl
-            batch_idx = oversample_batch(clsdict, cls, batch_size)
+            batch_idx = [rand(clsdict[rand(cls)]) for _ in 1:batch_size]
         else
             start_idx = (i - 1) * batch_size + 1
             end_idx = min(start_idx + batch_size - 1, n_samples)
@@ -65,7 +65,6 @@ function train_epoch!(model, opt, X_train, ytrain, pca_train, loss,
         Flux.update!(opt, model, grads[1])
         push!(epoch_losses, lv) 
     end
-    
     return mean(epoch_losses)
 end
 
@@ -91,6 +90,5 @@ function eval_epoch(model, X_test, y_test, pca_test, use_pca, batch_size, get_pr
             append!(epoch_trues, Flux.onecold(cpu(y_gpu)))
         end
     end
-    
     return mean(epoch_losses), epoch_preds, epoch_trues
 end
