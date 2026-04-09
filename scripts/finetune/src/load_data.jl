@@ -36,7 +36,7 @@ function get_labels(data::Lincs, level::String)
     elseif level == "lvl2"
         y = data.inst.pert_id
         counts = countmap(y)
-        valid_labels = Set(k for (k, v) in counts if 500 < v < 20000)
+        valid_labels = Set(k for (k, v) in counts if 1000 < v < 20000)
         idx = findall(l -> l in valid_labels, y)
         return X[:, idx], y[idx], idx
     else
@@ -197,4 +197,13 @@ function mstate(config::Config, pca_info, use_pca, n_classifications)
     end
     
     return ft_model, X_pca_train, X_pca_test
+end
+
+function oversmpl(y_train)
+    labels = Flux.onecold(cpu(y_train))
+    cidx_dict = Dict{Int, Vector{Int}}()
+    for (i, label) in enumerate(labels)
+        push!(get!(cidx_dict, label, Int[]), i)
+    end
+    return cidx_dict, collect(keys(cidx_dict))
 end

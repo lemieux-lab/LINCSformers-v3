@@ -12,13 +12,26 @@ include("src/load_data.jl")
 include("src/save.jl")
 
 # settings
-args_dict = Dict(replace(ARGS[i], "--" => "") => ARGS[i+1] for i in 1:2:(length(ARGS)-1))
+args_dict = Dict{String, String}()
+for i in 1:2:(length(ARGS)-1)
+    key = lstrip(ARGS[i], '-')
+    val = ARGS[i+1]
+    args_dict[key] = val
+end
 for (key, val_str) in args_dict
     sym = Symbol(key)
     if hasproperty(config, sym)
-        ExpectedType = fieldtype(typeof(config), sym)
-        parsed_val = ExpectedType <: AbstractString ? val_str : parse(ExpectedType, val_str)
+        T = Base.nonnothingtype(fieldtype(typeof(config), sym))
+        parsed_val = if T <: AbstractString
+            val_str
+        elseif T === Symbol
+            Symbol(val_str)
+        else
+            parse(T, val_str) 
+        end
         setproperty!(config, sym, parsed_val)
+    else
+        println("check ur argument '--$key', ignored")
     end
 end
 
@@ -56,7 +69,7 @@ model = Chain(
     Dense(256 => n_classifications)
 ) |> gpu
 
-opt = Flux.setup(Optimisers.Adam(config.lr), model)
+opt = Flux.setup(Optimisers.AdamW(config.lr), model)
 
 data_set = (X_train = X_train, ytrain = y_train, X_test = X_test, y_test = y_test, pca_train = nothing, pca_test = nothing)
 
@@ -76,6 +89,7 @@ acc = sum(logs_set.preds .== logs_set.trues) / length(logs_set.trues)
 save_run(save_dir, model, config.n_epochs, train_indices, test_indices, 
          logs_set.train_losses, logs_set.test_losses, logs_set.preds, logs_set.trues)
 
-log_params(save_dir; gpu=gpu_info, epochs=config.n_epochs, dataset=config.dataset, 
-           batch_size=config.batch_size, notes=config.additional_notes, 
-           run_time="$(div(total_mins, 60))h $(rem(total_mins, 60))m", accuracy=acc)
+log_params(save_dir; gpu=gpu_info, dataset=config.dataset, 
+           batch_size=config.batch_size, epochs=config.n_epochs, 
+           run_time="$(div(total_mins, 60))h $(rem(total_mins, 60))m", 
+           accuracy=acc, notes=config.additional_notes)

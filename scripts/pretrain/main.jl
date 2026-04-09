@@ -10,16 +10,27 @@ include("src/fxns.jl")
 include("src/plot.jl")
 include("src/save.jl")
 
-# run-specific settings
-args_dict = Dict(replace(ARGS[i], "--" => "") => ARGS[i+1] for i in 1:2:(length(ARGS)-1))
+# run-specific settings #TODO: is there an easier way to write this function?
+args_dict = Dict{String, String}()
+for i in 1:2:(length(ARGS)-1)
+    key = lstrip(ARGS[i], '-')
+    val = ARGS[i+1]
+    args_dict[key] = val
+end
 for (key, val_str) in args_dict
     sym = Symbol(key)
     if hasproperty(config, sym)
-        ExpectedType = fieldtype(typeof(config), sym)
-        parsed_val = ExpectedType <: AbstractString ? val_str : parse(ExpectedType, val_str)
+        T = Base.nonnothingtype(fieldtype(typeof(config), sym))
+        parsed_val = if T <: AbstractString
+            val_str
+        elseif T === Symbol
+            Symbol(val_str)
+        else
+            parse(T, val_str) 
+        end
         setproperty!(config, sym, parsed_val)
     else
-        println("check ur key:'--$key'")
+        println("check ur argument '--$key', ignored")
     end
 end
 if haskey(args_dict, "modeltype")

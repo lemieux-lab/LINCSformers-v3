@@ -42,3 +42,6 @@ level 2
 
 example usage
 ./slurm/finetune/sb_ft.sh e2e 1 lvl1 mlp trt test
+
+another example usage
+./sb_ft MODE EPOCHS LEVEL MODEL DATASET NOTES

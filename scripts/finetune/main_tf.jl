@@ -1,8 +1,7 @@
 # finetuning for transformers (full)
 
-using Pkg # TODO: put this in the slurm .sh file instead
-Pkg.activate("/home/golem/scratch/chans/lincsv3")
-Pkg.instantiate()
+# using Pkg
+# Pkg.activate("/home/golem/scratch/chans/lincsv3")
 
 using LincsProject, JLD2, Flux, Optimisers, ProgressBars, Statistics, CUDA, Dates, cuDNN, StatsBase
 
@@ -12,21 +11,32 @@ include("src/load_data.jl")
 include("src/save.jl")
 
 # settings
-args_dict = Dict(replace(ARGS[i], "--" => "") => ARGS[i+1] for i in 1:2:(length(ARGS)-1))
+args_dict = Dict{String, String}()
+for i in 1:2:(length(ARGS)-1)
+    key = lstrip(ARGS[i], '-')
+    val = ARGS[i+1]
+    args_dict[key] = val
+end
 for (key, val_str) in args_dict
     sym = Symbol(key)
     if hasproperty(config, sym)
-        ExpectedType = fieldtype(typeof(config), sym)
-        parsed_val = ExpectedType <: AbstractString ? val_str : parse(ExpectedType, val_str)
+        T = Base.nonnothingtype(fieldtype(typeof(config), sym))
+        parsed_val = if T <: AbstractString
+            val_str
+        elseif T === Symbol
+            Symbol(val_str)
+        else
+            parse(T, val_str) 
+        end
         setproperty!(config, sym, parsed_val)
     else
-        println("check ur key:'--$key'")
+        println("check ur argument '--$key', ignored")
     end
 end
 
 use_pca = config.modeltype in ("v1", "v2")
 use_oversmpl = config.level == "lvl2"
-include("../../structs/$(config.modeltype).jl")
+include("structs/$(config.modeltype).jl")
 if config.model_dir == ""
     dirs = Dict("rtf"=>"rank_tf/2026-03-24_02-55", "v1"=>"rtf_v1/2026-03-31_22-35", "v2"=>"rtf_v2/2026-03-31_08-46")
     config.model_dir = "/home/golem/scratch/chans/lincsv3/plots/trt/$(dirs[config.modeltype])"

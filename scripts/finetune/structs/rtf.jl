@@ -140,7 +140,7 @@ function FTModel(pt_model;
     )
     head = Flux.Chain(
         Flux.Dense(embed_dim => hidden_dim, gelu),
-        Flux.Dropout(drop_prob),
+        Flux.Dropout(config.drop_prob),
         Flux.Dense(hidden_dim => n_classifications)
         )
     return FTModel(pretrained, head)

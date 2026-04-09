@@ -11,7 +11,8 @@ function train(model, opt, data, config, logs)
 
     for epoch in ProgressBar(1:epochs)
         is_last = (epoch == epochs)
-        is_checkpt = !isnothing(freq) && (epoch % freq == 0 || is_last)
+        # is_checkpt = !isnothing(freq) && (epoch % freq == 0 || is_last)
+        is_checkpt = (!isnothing(freq) && epoch % freq == 0) || is_last
 
         train_loss = train_epoch!(model, opt, X_train, ytrain, pca_train, loss, 
                                   use_oversmpl, clsdict, cls, use_pca, batch_size)
@@ -63,7 +64,8 @@ function train_epoch!(model, opt, X_train, ytrain, pca_train, loss,
         end
         
         Flux.update!(opt, model, grads[1])
-        push!(epoch_losses, lv) 
+        lv = loss(model, x_gpu, x_pca, y_gpu, use_pca)
+        push!(epoch_losses, Float32(cpu(lv)))
     end
     return mean(epoch_losses)
 end
@@ -83,7 +85,7 @@ function eval_epoch(model, X_test, y_test, pca_test, use_pca, batch_size, get_pr
         x_pca = use_pca ? gpu(pca_test[:, batch_idx]) : nothing
 
         logits = use_pca ? model(x_gpu, x_pca) : model(x_gpu)
-        push!(epoch_losses, Flux.logitcrossentropy(logits, y_gpu))
+        push!(epoch_losses, Float32(cpu(Flux.logitcrossentropy(logits, y_gpu))))
 
         if get_preds
             append!(epoch_preds, Flux.onecold(cpu(logits)))

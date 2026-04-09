@@ -1,5 +1,8 @@
 # finetuning w/ same model, diff inputs
 
+# using Pkg
+# Pkg.activate("/home/golem/scratch/chans/lincsv3")
+
 using LincsProject, JLD2, Flux, Optimisers, ProgressBars, Statistics, CUDA, Dates, cuDNN, StatsBase
 
 include("src/params.jl")
@@ -8,15 +11,26 @@ include("src/load_data.jl")
 include("src/save.jl")
 
 # settings
-args_dict = Dict(replace(ARGS[i], "--" => "") => ARGS[i+1] for i in 1:2:(length(ARGS)-1))
+args_dict = Dict{String, String}()
+for i in 1:2:(length(ARGS)-1)
+    key = lstrip(ARGS[i], '-')
+    val = ARGS[i+1]
+    args_dict[key] = val
+end
 for (key, val_str) in args_dict
     sym = Symbol(key)
     if hasproperty(config, sym)
-        ExpectedType = fieldtype(typeof(config), sym)
-        parsed_val = ExpectedType <: AbstractString ? val_str : parse(ExpectedType, val_str)
+        T = Base.nonnothingtype(fieldtype(typeof(config), sym))
+        parsed_val = if T <: AbstractString
+            val_str
+        elseif T === Symbol
+            Symbol(val_str)
+        else
+            parse(T, val_str) 
+        end
         setproperty!(config, sym, parsed_val)
     else
-        println("check ur key:'--$key'")
+        println("check ur argument '--$key', ignored")
     end
 end
 
@@ -26,7 +40,7 @@ if haskey(args_dict, "dataset")
     config.data_path = "data/lincs_$(config.dataset)_data.jld2"
 end
 if config.modeltype != "mlp"
-    include("../../structs/$(config.modeltype).jl")
+    include("structs/$(config.modeltype).jl")
 end
 if config.model_dir == ""
     if config.modeltype == "rtf"
