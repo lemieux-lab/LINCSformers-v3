@@ -2,11 +2,11 @@
 # TODO: need to clean this up a bit
 
 using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincsv3")
+Pkg.activate("/home/golem/scratch/chans/lincsv4")
 
 using JLD2, CairoMakie, StatsBase, StatisticalMeasures, CategoricalArrays
 
-dir = "/home/golem/scratch/chans/lincsv3/plots/trt/rtf_v1/2026-03-11_10-42"
+dir = "/home/golem/scratch/chans/lincsv4/plots/trt/finetune/lvl2/v1/e2e/2026-04-10_14-06"
 all_trues = load("$dir/predstrues.jld2")["all_trues"]
 all_preds = load("$dir/predstrues.jld2")["all_preds"]
 

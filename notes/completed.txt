@@ -27,13 +27,13 @@ level 2
     with diff mlp (end2end)
         
         rtf: 
-        v1: 
-        v2: 
-        mlp: 
+        v1: /home/golem/scratch/chans/lincsv4/plots/trt/finetune/lvl2/v1/e2e/2026-04-10_14-06 (acc:0.48)
+        v2: /home/golem/scratch/chans/lincsv4/plots/trt/finetune/lvl2/v2/e2e/2026-04-10_14-06 (acc:0.49)
+        mlp: /home/golem/scratch/chans/lincsv4/plots/trt/finetune/lvl2/mlp/e2e/2026-04-10_14-11 (acc:0.51)
 
     with same mlp (emb extract)
 
-        rtf: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/rtf/emb/2026-04-09_17-14 (acc: 0.33)
+        rtf: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/rtf/emb/2026-04-09_17-14 (acc:0.33)
         v1: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/v1/emb/2026-04-09_17-14 (acc:0.28)
         v2: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/v2/emb/2026-04-09_17-14 (acc:0.31)
         mlp: /home/golem/scratch/chans/lincsv3/plots/trt/finetuning/lvl2/mlp/emb/2026-04-09_17-14 (acc:0.25)
