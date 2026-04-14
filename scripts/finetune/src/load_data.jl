@@ -55,16 +55,15 @@ function rank_genes(expr, medians)
     return data_ranked
 end
 
-function split_data(X, test_ratio::Float64, y=nothing)
+function split_data(X, ratio::Float64, y=nothing)
     n = size(X, 2)
     idx = shuffle(1:n)
-    test_n = floor(Int, n * test_ratio)
-    tst, trn = idx[1:test_n], idx[test_n+1:end]
-    
-    if isnothing(y)
-        return X[:, trn], X[:, tst], trn, tst
+    n_test = floor(Int, n*ratio)
+    test_idx, train_idx = idx[1:n_test], idx[n_test+1:end]
+    if isnothing(y) 
+        return X[:, train_idx], X[:, test_idx], train_idx, test_idx 
     end
-    return X[:, trn], y[trn], X[:, tst], y[tst], trn, tst
+    return X[:, train_idx], y[:, train_idx], X[:, test_idx], y[:, test_idx], train_idx, test_idx
 end
 
 function get_labels(data::Lincs, level::String)
@@ -144,6 +143,23 @@ function get_pooled(m, x, x_pca, m_type)
     return dropdims(mean(transformed, dims=2), dims=2)
 end
 
+function extract_embeds(X_ranked, raw_data)
+    embeds = []
+    n_samples = size(X_ranked, 2)
+    for i in 1:config.batch_size:n_samples
+        b_idx = i:min(i+config.batch_size-1, n_samples)
+        x_batch = gpu(Int32.(X_ranked[:, b_idx]))
+        
+        if use_pca && !isnothing(pca_info)
+            x_pca_batch = gpu(Float32.(MultivariateStats.predict(pca_info.norm, Float32.(raw_data[:, b_idx]))))
+            push!(embeds, cpu(get_pooled(pt_model, x_batch, x_pca_batch, config.modeltype)))
+        else
+            push!(embeds, cpu(get_pooled(pt_model, x_batch, nothing, config.modeltype)))
+        end
+    end
+    return hcat(embeds...)
+end
+
 function emb(config::Config, X_train, X_test, pca_info, use_pca, n_genes, n_classifications)
     if config.modeltype == "mlp"
         ft_model = Flux.Chain(
@@ -169,23 +185,6 @@ function emb(config::Config, X_train, X_test, pca_info, use_pca, n_genes, n_clas
     
     Flux.loadmodel!(pt_model, state)
     Flux.testmode!(pt_model)
-
-    function extract_embeds(X_ranked, raw_data)
-        embeds = []
-        n_samples = size(X_ranked, 2)
-        for i in 1:config.batch_size:n_samples
-            b_idx = i:min(i+config.batch_size-1, n_samples)
-            x_batch = gpu(Int32.(X_ranked[:, b_idx]))
-            
-            if use_pca && !isnothing(pca_info)
-                x_pca_batch = gpu(Float32.(MultivariateStats.predict(pca_info.norm, Float32.(raw_data[:, b_idx]))))
-                push!(embeds, cpu(get_pooled(pt_model, x_batch, x_pca_batch, config.modeltype)))
-            else
-                push!(embeds, cpu(get_pooled(pt_model, x_batch, nothing, config.modeltype)))
-            end
-        end
-        return hcat(embeds...)
-    end
 
     train_input = extract_embeds(X_train, use_pca ? pca_info.raw_train : nothing)
     test_input = extract_embeds(X_test, use_pca ? pca_info.raw_test : nothing)

@@ -1,7 +1,7 @@
 # finetuning w/ same model, diff inputs
 
 # using Pkg
-# Pkg.activate("/home/golem/scratch/chans/lincsv3")
+# Pkg.activate("/home/golem/scratch/chans/lincsv4")
 
 using LincsProject, JLD2, Flux, Optimisers, ProgressBars, Statistics, CUDA, Dates, cuDNN, StatsBase
 
@@ -38,17 +38,15 @@ end
 CUDA.device!(0)
 gpu_info = CUDA.name(device())
 if !haskey(kwargs, "batch_size")
-    if gpu_info == "NVIDIA GeForce GTX 1080 Ti"
-        config.batch_size = 64
-    elseif gpu_info == "Tesla V100-SXM2-32GB"
-        config.batch_size = 128
+    if gpu_info ∈ ("Tesla V100-SXM2-32GB", "NVIDIA RTX 6000 Ada Generation", "NVIDIA GH200 144G HBM3e")
+    config.batch_size = 128
     else
         config.batch_size = 64
     end
 end
 
 timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM")
-save_dir = joinpath("plots", config.dataset, "finetuning", config.level, config.modeltype, "emb", timestamp)
+save_dir = joinpath("plots", config.dataset, "finetune", config.level, config.modeltype, "emb", timestamp)
 mkpath(save_dir)
 
 # train
@@ -57,28 +55,22 @@ data = load(config.data_path)["filtered_data"]
 
 data = load(config.data_path)["filtered_data"]
 
-X_train, X_test, y_train, y_test, 
-    train_indices, test_indices, n_genes, n_classifications, 
-    clsdict, cls, pca_info = dsplit(data, config)
+X_train, X_test, y_train, y_test, train_indices, test_indices, 
+    n_genes, n_classifications, clsdict, cls, pca_info = dsplit(data, config)
 
 ft_model, train_input, test_input = emb(config, X_train, X_test, 
                                         pca_info, use_pca, n_genes, n_classifications)
 
 opt = Flux.setup(Optimisers.Adam(config.lr), ft_model)
 
-
 # pca is nothing bc the ft_model only takes the pooled embeddings
-data_set = (X_train = train_input, ytrain = y_train, 
-    X_test = test_input, y_test = y_test, 
-    pca_train = nothing, pca_test = nothing)
+data_set = (X_train=train_input, ytrain=y_train, X_test=test_input, y_test=y_test, pca_train=nothing, pca_test=nothing)
 
-config_set = (epochs = config.n_epochs, batch_size = config.batch_size, loss = ce_loss, 
-    use_pca = false, use_oversmpl = use_oversmpl, 
-    clsdict = clsdict, cls = cls, 
-    freq = config.cp_freq, save_dir = save_dir, pt = "embed_ft")
+config_set = (epochs=config.n_epochs, batch_size=config.batch_size, loss=ce_loss, 
+                use_pca=false, use_oversmpl=use_oversmpl, clsdict=clsdict, cls=cls, 
+                freq=config.cp_freq, save_dir=save_dir, pt="")
 
-logs_set = (train_losses = Float32[], test_losses = Float32[], 
-    preds = Int[], trues = Int[])
+logs_set = (train_losses=Float32[], test_losses=Float32[], preds=Int[], trues=Int[])
 
 train(ft_model, opt, data_set, config_set, logs_set)
 acc = sum(logs_set.preds .== logs_set.trues) / length(logs_set.trues)
@@ -95,5 +87,4 @@ save_run(save_dir, ft_model, config.n_epochs, train_indices, test_indices,
 
 log_params(save_dir; gpu=gpu_info, epochs=config.n_epochs, dataset=config.dataset, 
            batch_size=config.batch_size, drop_prob=config.drop_prob, lr=config.lr, 
-           notes=config.additional_notes, 
-           run_time="$(run_hours)h $(run_minutes)m", accuracy=acc)
+           notes=config.additional_notes, run_time="$(run_hours)h $(run_minutes)m", accuracy=acc)

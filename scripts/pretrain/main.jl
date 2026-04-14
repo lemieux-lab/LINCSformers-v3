@@ -1,5 +1,5 @@
 # using Pkg
-# Pkg.activate("/home/golem/scratch/chans/lincsv3")
+# Pkg.activate("/home/golem/scratch/chans/lincsv4")
 # TODO: do aarch pkg in sbatch file, make sure ArgParse is in the pkg manager for this via interactive run on balrog first
 
 using DataFrames, Dates, StatsBase, JLD2, LincsProject
@@ -11,20 +11,20 @@ include("src/fxns.jl")
 include("src/plot.jl")
 include("src/save.jl")
 
-# run-specific settings #TODO: is there an easier way to write this function?
+# run-specific settings
 args = load_args()
 kwargs = Dict(Symbol(k) => v for (k, v) in args)
 config = Config(; kwargs...)
 
-if haskey(args_dict, "modeltype")
-    mode_map = Dict("rtf" => :none, "v1" => :concat, "v2" => :add)
-    config.pca_mode = mode_map[config.modeltype]
-end
-if haskey(args_dict, "dataset")
+mode_map = Dict("rtf" => :none, "v1" => :concat, "v2" => :add)
+config.pca_mode = mode_map[config.modeltype]
+
+if haskey(kwargs, "dataset")
     config.data_path = "data/lincs_$(config.dataset)_data.jld2" # fyi trt refers to trt and untrt, untrt is untrt only
 end
+
 gpu_info = CUDA.name(device())
-if !haskey(args_dict, "batch_size")
+if !haskey(kwargs, "batch_size")
     if gpu_info == "NVIDIA GeForce GTX 1080 Ti"
         config.batch_size = 42
     elseif gpu_info == "Tesla V100-SXM2-32GB"
@@ -82,12 +82,12 @@ opt = Flux.setup(Adam(config.lr), model)
 train_losses, test_losses, test_rank_errors = Float32[], Float32[], Float32[]
 final_preds, final_trues = Int[], Int[]
 
-X_train_masked_gpu = gpu(Int.(X_train_masked))
-y_train_masked_gpu = gpu(Int.(y_train_masked))
-X_test_masked_gpu = gpu(Int.(X_test_masked))
-y_test_masked_gpu = gpu(Int.(y_test_masked))
-raw_train_gpu = gpu(Float32.(raw_train))
-raw_test_gpu = gpu(Float32.(raw_test))
+# X_train_masked_gpu = gpu(Int.(X_train_masked))
+# y_train_masked_gpu = gpu(Int.(y_train_masked))
+# X_test_masked_gpu = gpu(Int.(X_test_masked))
+# y_test_masked_gpu = gpu(Int.(y_test_masked))
+# raw_train_gpu = gpu(Float32.(raw_train))
+# raw_test_gpu = gpu(Float32.(raw_test))
 
 for epoch in ProgressBar(1:config.n_epochs)
     train_loss, _, _, _, _, _ = train_epoch(model, opt, X_train_masked_gpu, y_train_masked_gpu, raw_train_gpu, 

@@ -3,21 +3,13 @@ using Flux, CUDA, StatsBase, Statistics, Random, ArgParse
 function load_args()
     s = ArgParseSettings()
     @add_arg_table s begin
-        "--mode", "-m"
-            help = "ft mode: e2e or emb"
-            arg_type = String
-            required = true
-        "--level", "-l"
-            help = "level of finetuning: lvl1 or lvl2"
-            arg_type = String
-            required = true
         "--n_epochs", "-e"
             help = "number of epochs total"
             arg_type = Int
             default = 1
             required = true
         "--modeltype", "-t"
-            help = "model type: rtf, mlp, v1, or v2"
+            help = "model type: rtf, v1, or v2"
             arg_type = String
             required = true
         "--dataset", "-d"
