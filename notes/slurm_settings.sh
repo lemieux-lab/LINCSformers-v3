@@ -6,15 +6,16 @@ _slurm_submit () {
     local cpus="$2"
     local gpu="$3"
     local mem="$4"
-    local time_limit="$5"
-    local partition="$6"
-    shift 6
+    shift 4
 
     if [ $# -lt 1 ]; then
         echo -e "\e[1;31mError: Missing arguments.\e[0m"
-        echo "Usage: _slurm_submit JOB_NAME CPUS GPU MEM TIME PARTITION COMMAND..."
+        echo "Usage: _slurm_submit JOB_NAME CPUS GPU MEM COMMAND..."
         return 1
     fi
+
+    local time_limit="${SLURM_TIME:-}"
+    local partition="${SLURM_PARTITION:-}"
 
     local timestamp
     local log_dir="/home/golem/scratch/chans/lincsv4/slurm/logs"
@@ -58,20 +59,22 @@ _slurm_submit () {
     sbatch "${sbatch_args[@]}" --wrap "${cmd[*]}"
 }
 
-# ALIASES: job_name | cpus | gpu | mem | time | partition | command...
-tera_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}" 100 gpu:1         1000G "" "" "${@:2}"; }
-giga_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  50 gpu:1          500G "" "" "${@:2}"; }
-mega_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  20 gpu:1          100G "" "" "${@:2}"; }
-kilo_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  10 gpu:1           50G "" "" "${@:2}"; }
-micro_sbatch() { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"   2 gpu:1           25G "" "" "${@:2}"; }
+tera_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}" 100 gpu:1         1000G "${@:2}"; }
+giga_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  50 gpu:1          500G "${@:2}"; }
+mega_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  20 gpu:1          100G "${@:2}"; }
+kilo_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  10 gpu:1           50G "${@:2}"; }
+micro_sbatch() { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"   2 gpu:1           25G "${@:2}"; }
 
-v100_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  16 gpu:V100:1      90G "" "" "${@:2}"; }
-l40s_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}" 128 gpu:L40S:1     800G "" "" "${@:2}"; }
-gh200_sbatch() { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  64 gpu:GH200:1    500G "" "" "${@:2}"; }
-gh18_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  16 gpu:1g.18gb:1  125G "" "" "${@:2}"; }
+v100_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  16 gpu:V100:1      90G "${@:2}"; }
+l40b_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}" 128 gpu:L40S:1     800G "${@:2}"; }
+l40m_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  64 gpu:L40S:1     400G "${@:2}"; }
+l40s_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  32 gpu:L40S:1     200G "${@:2}"; }
+gh200_sbatch() { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  64 gpu:GH200:1    500G "${@:2}"; }
+gh18_sbatch()  { _slurm_submit "${1:-$(date +%Y%m%d_%H%M)}"  16 gpu:1g.18gb:1  125G "${@:2}"; }
 
 var_sbatch() {
     if [ $# -lt 4 ]; then
+        echo -e "\e[1;31mError: Missing arguments.\e[0m"
         echo "Usage: var_sbatch JOB_NAME CPUS GPU MEM COMMAND..."
         return 1
     fi
@@ -81,9 +84,8 @@ var_sbatch() {
     local mem="$4"
     shift 4
     
-    _slurm_submit "$job_name" "$cpus" "$gpu" "$mem" "" "" "$@"
+    _slurm_submit "$job_name" "$cpus" "$gpu" "$mem" "$@"
 }
-
 slurm_presets() {
     printf "\n"
     printf "\e[1;36m========================================================================================\e[0m\n"
@@ -99,7 +101,9 @@ slurm_presets() {
     printf "%-15s %-10s %-15s %-10s\n" "giga_sbatch"  "50"  "gpu:1"         "500G"
     printf "%-15s %-10s %-15s %-10s\n" "tera_sbatch"  "100" "gpu:1"         "1000G"
     printf "%-15s %-10s %-15s %-10s\n" "v100_sbatch"  "16"  "gpu:V100:1"    "90G"
-    printf "%-15s %-10s %-15s %-10s\n" "l40s_sbatch"  "128" "gpu:L40S:1"    "800G"
+    printf "%-15s %-10s %-15s %-10s\n" "l40b_sbatch"  "128" "gpu:L40S:1"    "800G"
+    printf "%-15s %-10s %-15s %-10s\n" "l40m_sbatch"  "64"  "gpu:L40S:1"    "400G"
+    printf "%-15s %-10s %-15s %-10s\n" "l40s_sbatch"  "32"  "gpu:L40S:1"    "200G"
     printf "%-15s %-10s %-15s %-10s\n" "gh200_sbatch" "64"  "gpu:GH200:1"   "500G"
     printf "%-15s %-10s %-15s %-10s\n" "gh18_sbatch"  "16"  "gpu:1g.18gb:1" "125G"
 
@@ -188,6 +192,7 @@ sarchive() {
 
 alias sp="slurm_presets"
 alias spresets="slurm_presets"
+alias sq="squeue -u chans"
 # <<< slurm helper setup <<<
 
 # >>> training runs >>>
@@ -199,10 +204,11 @@ run_finetune() {
     local model="$5"
     local dataset="$6"
     local note="$7"
+    local opt_time="$8"
 
     if [ $# -lt 7 ]; then
         echo -e "\e[1;31mError: Missing arguments.\e[0m"
-        echo "Usage: run_finetune [PRESET] [MODE] [LEVEL] [EPOCHS] [MODEL] [DATASET] [NOTE]"
+        echo "Usage: run_finetune [PRESET] [MODE] [LEVEL] [EPOCHS] [MODEL] [DATASET] [NOTE] [OPTIONAL_TIME]"
         return 1
     fi
 
@@ -212,9 +218,13 @@ run_finetune() {
     fi
 
     local julia_script=""
+    local SLURM_TIME=""
+    
     if [[ "$mode" == "emb" ]]; then
         julia_script="scripts/finetune/main_emb.jl"
+        SLURM_TIME="1-00:00:00"
     elif [[ "$mode" == "e2e" ]]; then
+        SLURM_TIME="4-00:00:00"
         if [[ "$model" == "mlp" ]]; then
             julia_script="scripts/finetune/main_mlp.jl"
         else
@@ -225,10 +235,14 @@ run_finetune() {
         return 1
     fi
 
+    if [ -n "$opt_time" ]; then
+        SLURM_TIME="$opt_time"
+    fi
+
     local job_name="${mode^^}_${level}_${epochs}_${model}_${dataset}"
 
     local cmd="
-    
+
 ARCH=\$(uname -m)
 if [[ \"\$ARCH\" == \"aarch64\" || \"\$ARCH\" == \"arm64\" ]]; then
     ENV_PATH=\"/home/golem/scratch/chans/lincsv3/aarch64\"
@@ -259,10 +273,11 @@ run_pretrain() {
     local model="$3"
     local dataset="$4"
     local note="$5"
+    local opt_time="$6"
 
     if [ $# -lt 5 ]; then
         echo -e "\e[1;31mError: Missing arguments.\e[0m"
-        echo "Usage: run_pretrain [PRESET] [EPOCHS] [MODEL] [DATASET] [NOTE]"
+        echo "Usage: run_pretrain [PRESET] [EPOCHS] [MODEL] [DATASET] [NOTE] [OPTIONAL_TIME]"
         return 1
     fi
 
@@ -272,8 +287,15 @@ run_pretrain() {
     fi
 
     local job_name="${epochs}_${model}_${dataset}"
+    
+    local SLURM_TIME="7-00:00:00"
+
+    if [ -n "$opt_time" ]; then
+        SLURM_TIME="$opt_time"
+    fi
 
     local cmd="
+
 ARCH=\$(uname -m)
 if [[ \"\$ARCH\" == \"aarch64\" || \"\$ARCH\" == \"arm64\" ]]; then
     ENV_PATH=\"/home/golem/scratch/chans/lincsv3/aarch64\"
@@ -306,15 +328,15 @@ training_presets() {
     printf "\e[1;33m%-15s %-10s %-10s %-10s %-18s %-10s\e[0m\n" "Command" "Mode" "Level" "Epochs" "Model" "Dataset"
     printf "%-15s %-10s %-10s %-10s %-18s %-10s\n" "--------------" "---------" "---------" "---------" "------------------" "---------"
 
-    printf "%-15s %-10s %-10s %-10s %-18s %-10s\n" "run_finetune" "e2e, emb" "1, 2" "Int" "mlp, rtf, v1, v2" "trt, untrt"
+    printf "%-15s %-10s %-10s %-10s %-18s %-10s\n" "run_finetune" "e2e, emb" "lvl1, lvl2" "Int" "mlp, rtf, v1, v2" "trt, untrt"
     printf "%-15s %-10s %-10s %-10s %-18s %-10s\n" "run_pretrain" "N/A" "N/A" "Int" "rtf, v1, v2" "trt, untrt"
 
     printf "\n"
-    printf "\e[1;33mFT Usage:\e[0m run_finetune [PRESET] [MODE] [LEVEL] [EPOCHS] [MODEL] [DATASET] [NOTE]\n"
-    printf "\e[1;33mPT Usage:\e[0m run_pretrain [PRESET] [EPOCHS] [MODEL] [DATASET] [NOTE]\n"
+    printf "\e[1;33mFT Usage:\e[0m run_finetune [PRESET] [MODE] [LEVEL] [EPOCHS] [MODEL] [DATASET] [NOTE] \e[90m[TIME]\e[0m\n"
+    printf "\e[1;33mPT Usage:\e[0m run_pretrain [PRESET] [EPOCHS] [MODEL] [DATASET] [NOTE] \e[90m[TIME]\e[0m\n"
+    printf "\e[90m(Note: TIME is optional. Pass as D-HH:MM:SS. Defaults: FT emb=1d, FT e2e=4d, PT=7d)\e[0m\n"
     printf "\e[1;36m========================================================================================\e[0m\n\n"
 }
 
 alias tp="training_presets"
 # <<< training runs <<<
-
