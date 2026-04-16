@@ -17,6 +17,6 @@ Base.@kwdef mutable struct Config
     modeltype::String = "mlp"
     pca_mode::Symbol = :none
 
-    wandb_mode::String = "offline"
+    wandb_mode::String = "online"
     note::String = "test"
 end

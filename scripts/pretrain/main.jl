@@ -37,6 +37,17 @@ if !haskey(kwargs, "batch_size")
     end
 end
 
+# wandb settings
+include("deps/build.jl")
+using PyCall
+println("using pycall from: ", PyCall.python)
+timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM")
+run_name = "$(timestamp)_pretrain_$(config.modeltype)"
+wandb = pyimport("wandb")
+config_dict = Dict(String(k) => getfield(config, k) for k in fieldnames(typeof(config)))
+wandb.init(project="LINCSformers", config=config, mode=config.wandb_mode, name=run_name)
+
+
 # start here
 CUDA.device!(0)
 start_time = now()
@@ -130,6 +141,16 @@ for epoch in ProgressBar(1:config.n_epochs)
                                                                             mode=:test, is_final_epoch=is_final)
     push!(test_losses, test_loss)
     push!(test_rank_errors, test_err)
+
+    if config.wandb_mode != "disabled"
+        wandb.log(Dict(
+            "epoch" => epoch,
+            "train_loss" => train_loss,
+            "test_loss" => test_loss,
+            "test_rank_error" => test_err 
+        ))
+    end
+
     if is_final
         final_preds, final_trues = preds, trues
         final_original_ranks, final_prediction_errors = orig_ranks, pred_errs
@@ -172,3 +193,5 @@ log_info(train_indices, test_indices,
             final_trues, X_test_masked, y_test_masked, X_test, 
             save_dir)
 log_tf_params(config, gpu_info, div(total_minutes, 60), rem(total_minutes, 60), save_dir)
+
+wandb.finish()
