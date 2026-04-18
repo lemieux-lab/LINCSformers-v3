@@ -30,7 +30,7 @@ function load_args()
             arg_type = Int
             default = 64
             required = false
-        "--note", "-n"
+        "--additional_notes", "-n"
             help = "run-specific notes"
             arg_type = String
             required = false
@@ -73,7 +73,7 @@ function get_labels(data::Lincs, level::String)
     elseif level == "lvl2"
         y = data.inst.pert_id
         counts = countmap(y)
-        valid_labels = Set(k for (k, v) in counts if 1000 < v < 20000)
+        valid_labels = Set(k for (k, v) in counts if 1000 < v < 20000) # 7k for testing, 1k for running
         idx = findall(l -> l in valid_labels, y)
         return X[:, idx], y[idx], idx
     else

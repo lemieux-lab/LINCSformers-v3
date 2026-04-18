@@ -6,9 +6,9 @@ Base.@kwdef mutable struct Config
 
     level::String = "lvl2"
     batch_size::Int = 128
-    n_epochs::Int = 1
-    pt1_epochs::Int = 1
-    pt2_epochs::Int = 1
+    n_epochs::Int = 5
+    pt1_epochs::Int = 2
+    pt2_epochs::Int = 8
     cp_freq::Union{Int,Nothing} = nothing
 
     embed_dim::Int = 128
@@ -18,8 +18,8 @@ Base.@kwdef mutable struct Config
     hidden_dim::Int = 256
     n_heads::Int = 2
     n_layers::Int = 4
-    modeltype::String = "mlp"
+    modeltype::String = "rtf"
     pca_mode::Symbol = :none
 
-    note::String = "test"
+    additional_notes::String = "test"
 end

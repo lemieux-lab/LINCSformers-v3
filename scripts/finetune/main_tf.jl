@@ -1,7 +1,8 @@
 # finetuning for transformers (full)
 
-# using Pkg
-# Pkg.activate("/home/golem/scratch/chans/lincsv4")
+using Pkg
+Pkg.activate("/home/golem/scratch/chans/lincsv4")
+Pkg.precompile()
 
 using LincsProject, JLD2, Flux, Optimisers, ProgressBars, Statistics, CUDA, Dates, cuDNN, StatsBase
 
@@ -14,6 +15,9 @@ include("src/save.jl")
 args = load_args()
 kwargs = Dict(Symbol(k) => v for (k, v) in args)
 config = Config(; kwargs...)
+
+# config = Config()
+# config.modeltype = "v1"
 
 use_pca = config.modeltype in ("v1", "v2")
 use_oversmpl = config.level == "lvl2"
@@ -30,13 +34,20 @@ CUDA.device!(0)
 gpu_info = CUDA.name(device())
 if gpu_info ∈ ("Tesla V100-SXM2-32GB", "NVIDIA RTX 6000 Ada Generation", "NVIDIA GH200 144G HBM3e")
     config.batch_size = 128
+elseif gpu_info == "NVIDIA RTX A4500"
+    config.batch_size = 90
 else
     config.batch_size = 64
 end
 
+# config.batch_size = 42
+
 timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM")
-save_dir = joinpath("plots", config.dataset, "finetune", config.level, config.modeltype, timestamp)
+println(timestamp)
+save_dir = joinpath("plots", config.dataset, "finetune", config.level, config.modeltype, config.mode, timestamp)
 mkpath(save_dir)
+
+# println(save_dir)
 
 # train
 start_time = now()
@@ -53,6 +64,9 @@ data_set = (X_train=X_train, ytrain=y_train, X_test=X_test, y_test=y_test, pca_t
 pt1_epochs = floor(0.1 * config.n_epochs)
 pt2_epochs = floor(0.9 * config.n_epochs)
 
+# pt1_epochs = 1
+# pt2_epochs = 1
+
 # pt1: gradient updates weights inside classifier not tf
 Optimisers.freeze!(opt.pretrained) 
 
@@ -61,6 +75,7 @@ train(model, opt, data_set, (epochs=pt1_epochs, batch_size=config.batch_size, lo
 
 acc_pt1 = sum(logs_pt1.preds .== logs_pt1.trues) / length(logs_pt1.trues)
 save_run(save_dir, model, pt1_epochs, train_indices, test_indices, logs_pt1.train_losses, logs_pt1.test_losses, logs_pt1.preds, logs_pt1.trues, prefix="pt1_")
+# println("saved pt1 at $save_dir")
 
 # pt2: gradient updates both transformer and classifier weights
 Optimisers.thaw!(opt.pretrained)
@@ -71,6 +86,7 @@ train(model, opt, data_set, (epochs=pt2_epochs, batch_size=config.batch_size, lo
 
 acc_pt2 = sum(logs_pt2.preds .== logs_pt2.trues) / length(logs_pt2.trues)
 save_run(save_dir, model, pt2_epochs, train_indices, test_indices, logs_pt2.train_losses, logs_pt2.test_losses, logs_pt2.preds, logs_pt2.trues, prefix="pt2_")
+# println("saved pt2 at $save_dir")
 
 # log
 end_time = now()
@@ -84,3 +100,5 @@ log_params(save_dir, config;
            run_time="$(run_hours)h $(run_minutes)m", 
            pt1_accuracy=acc_pt1, 
            pt2_accuracy=acc_pt2)
+
+println("saved everything at $save_dir")
