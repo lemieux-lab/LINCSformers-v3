@@ -3,3 +3,5 @@ plots/
 slurm/
 sandbox/
 .venv/
+.vscode/
+wandb/

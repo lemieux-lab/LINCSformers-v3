@@ -1,9 +1,10 @@
 # using Pkg
 # Pkg.activate("/home/golem/scratch/chans/lincsv4")
 # TODO: do aarch pkg in sbatch file, make sure ArgParse is in the pkg manager for this via interactive run on balrog first
-
+using Pkg
 using DataFrames, Dates, StatsBase, JLD2, LincsProject
-using Flux, Random, ProgressBars, CUDA, cuDNN, Statistics, CairoMakie, LinearAlgebra, MultivariateStats
+using cuDNN
+using Flux, Random, ProgressBars, CUDA, Statistics, CairoMakie, LinearAlgebra, MultivariateStats
 
 include("src/params.jl")
 include("src/structs.jl")
@@ -15,6 +16,8 @@ include("src/save.jl")
 args = load_args()
 kwargs = Dict(Symbol(k) => v for (k, v) in args)
 config = Config(; kwargs...)
+
+config = Config()
 
 mode_map = Dict("rtf" => :none, "v1" => :concat, "v2" => :add)
 config.pca_mode = mode_map[config.modeltype]
@@ -33,7 +36,7 @@ if !haskey(kwargs, "batch_size")
         config.batch_size = 500
         config.lr *= 5
     else
-        config.batch_size = 64
+        config.batch_size = 64 # incl "NVIDIA GH200 144G HBM3e MIG 1g.18gb"
     end
 end
 
@@ -45,7 +48,7 @@ timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM")
 run_name = "$(timestamp)_pretrain_$(config.modeltype)"
 wandb = pyimport("wandb")
 config_dict = Dict(String(k) => getfield(config, k) for k in fieldnames(typeof(config)))
-wandb.init(project="LINCSformers", config=config, mode=config.wandb_mode, name=run_name)
+wandb.init(project="LINCSformers", config=config_dict, mode=config.wandb_mode, name=run_name)
 
 
 # start here
@@ -77,6 +80,18 @@ else
     mgpu = nothing
 end
 
+model = Model(
+    input_size=n_features, 
+    pca_dim=config.embed_dim, 
+    embed_dim=config.embed_dim,
+    n_layers=config.n_layers, 
+    n_classes=n_classes, 
+    n_heads=config.n_heads,
+    hidden_dim=config.hidden_dim, 
+    dropout_prob=config.drop_prob,
+    pca_mode=config.pca_mode) |> gpu
+
+using cuDNN
 model = Model(
     input_size=n_features, 
     pca_dim=config.embed_dim, 
@@ -129,14 +144,16 @@ end
 # raw_train_gpu = gpu(Float32.(raw_train))
 # raw_test_gpu = gpu(Float32.(raw_test))
 
+final_original_ranks, final_prediction_errors = Int[], Int[]
+
 for epoch in ProgressBar(1:config.n_epochs)
-    train_loss, _, _, _, _, _ = train_epoch(model, opt, X_train_masked_gpu, y_train_masked_gpu, raw_train_gpu, 
+    train_loss, _, _, _, _, _ = train_epoch(model, opt, X_train_masked, y_train_masked, raw_train, 
                                             pgpu, mgpu, MASK_ID, n_classes, config.batch_size; 
                                             mode=:train, is_final_epoch=false)
     push!(train_losses, train_loss)
     
     is_final = (epoch == config.n_epochs)
-    test_loss, test_err, preds, trues, orig_ranks, pred_errs = train_epoch(model, opt, X_test_masked_gpu, y_test_masked_gpu, raw_test_gpu, 
+    test_loss, test_err, preds, trues, orig_ranks, pred_errs = train_epoch(model, opt, X_test_masked, y_test_masked, raw_test, 
                                                                             pgpu, mgpu, MASK_ID, n_classes, config.batch_size; 
                                                                             mode=:test, is_final_epoch=is_final)
     push!(test_losses, test_loss)
@@ -152,8 +169,10 @@ for epoch in ProgressBar(1:config.n_epochs)
     end
 
     if is_final
-        final_preds, final_trues = preds, trues
-        final_original_ranks, final_prediction_errors = orig_ranks, pred_errs
+        append!(empty!(final_preds), preds)
+        append!(empty!(final_trues), trues)
+        append!(empty!(final_original_ranks), orig_ranks)
+        append!(empty!(final_prediction_errors), pred_errs)
     end
 
     is_checkpt = (!isnothing(freq) && epoch % freq == 0) || is_final

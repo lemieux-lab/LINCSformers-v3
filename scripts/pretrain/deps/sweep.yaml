@@ -1,0 +1,33 @@
+project: LINCSformers
+program: scripts/pretrain/main.jl
+method: bayes
+metric:
+  name: test_loss
+  goal: minimize
+parameters:
+  modeltype:
+    value: "rtf"
+  dataset:
+    value: "trt"
+  n_epochs:
+    value: 50
+  lr:
+    distribution: log_uniform_values
+    min: 0.0001
+    max: 0.01
+  drop_prob:
+    min: 0.01
+    max: 0.2
+  embed_dim:
+    values: [32, 64, 128]
+  hidden_dim:
+    values: [64, 128, 256]
+  n_heads:
+    values: [1, 2]
+  n_layers:
+    values: [2, 3, 4]
+command:
+  - ${env}
+  - julia
+  - ${program}
+  - ${args}

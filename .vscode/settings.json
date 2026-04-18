@@ -1,3 +1,4 @@
 {
-    "julia.executablePath": "u/chans/.juliaup-x86_64/bin/julia"
+    "julia.executablePath": "u/chans/.juliaup-x86_64/bin/julia",
+    "python.terminal.activateEnvironment": false
 }

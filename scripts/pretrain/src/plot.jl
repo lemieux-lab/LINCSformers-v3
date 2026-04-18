@@ -1,6 +1,3 @@
-using Pkg
-Pkg.activate("/home/golem/scratch/chans/lincsv3")
-
 using JLD2, Dates, DataFrames, Statistics, CUDA, Flux, CairoMakie, StatsBase
 
 function plot_loss(n_epochs, train_losses, test_losses, save_dir, loss::String, pt1::Bool=false, pt2::Bool=false)

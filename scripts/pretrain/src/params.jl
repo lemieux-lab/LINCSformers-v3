@@ -14,9 +14,9 @@ Base.@kwdef mutable struct Config
     hidden_dim::Int = 256
     n_heads::Int = 2
     n_layers::Int = 4
-    modeltype::String = "mlp"
+    modeltype::String = "rtf"
     pca_mode::Symbol = :none
 
-    wandb_mode::String = "online"
-    note::String = "test"
+    wandb_mode::String = "disabled"
+    additional_notes::String = "test"
 end

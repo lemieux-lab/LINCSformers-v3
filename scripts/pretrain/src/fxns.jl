@@ -22,7 +22,7 @@ function load_args()
             arg_type = Int
             default = 64
             required = false
-        "--note", "-n"
+        "--additional_notes", "-n"
             help = "run-specific notes"
             arg_type = String
             required = false
@@ -31,6 +31,9 @@ function load_args()
 end
 
 function find_latest_checkpoint(base_dir)
+    if !isdir(base_dir)
+        return nothing, nothing, 0
+    end
     
     # get most recent timestamp
     run_dirs = filter(isdir, readdir(base_dir, join=true))
@@ -146,12 +149,11 @@ function train_epoch(model, opt, X_masked, y_masked, raw_data,
         if mode == :train
             # train
             l_val, grads = Flux.withgradient(model) do m
-                l, _, _ = masked_logitcrossentropy(m(x_batch, x_pca), y_batch, n_classes)
-                return l
+                masked_logitcrossentropy(m(x_batch, x_pca), y_batch, n_classes)[1]
             end
             Flux.update!(opt, model, grads[1])
             # l_val = masked_logitcrossentropy(model(x_batch, x_pca), y_batch, n_classes)
-            push!(epoch_losses, l_val)
+            push!(epoch_losses, l_val[1])
 
         else 
             # test
@@ -189,3 +191,24 @@ function train_epoch(model, opt, X_masked, y_masked, raw_data,
 
     return mean(epoch_losses), mean(epoch_rank_errors), all_preds, all_trues, all_original_ranks, all_prediction_errors
 end
+
+# since cuDNN is being phased out, need manual self-attention function
+import NNlib
+
+function manual_softmax(x::CuArray; dims=1)
+    max_x = maximum(x, dims=dims)
+    exp_x = exp.(x .- max_x)
+    return exp_x ./ sum(exp_x, dims=dims)
+end
+
+function manual_logsoftmax(x::CuArray; dims=1)
+    max_x = maximum(x, dims=dims)
+    exp_x = exp.(x .- max_x)
+    return (x .- max_x) .- log.(sum(exp_x, dims=dims))
+end
+
+NNlib.softmax(x::CuArray; dims=1) = manual_softmax(x; dims=dims)
+NNlib.softmax!(y::CuArray, x::CuArray; dims=1) = (y .= manual_softmax(x; dims=dims))
+
+NNlib.logsoftmax(x::CuArray; dims=1) = manual_logsoftmax(x; dims=dims)
+NNlib.logsoftmax!(y::CuArray, x::CuArray; dims=1) = (y .= manual_logsoftmax(x; dims=dims))
