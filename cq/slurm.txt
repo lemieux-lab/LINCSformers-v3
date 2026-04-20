@@ -1,0 +1,1 @@
+salloc --time=2:0:0 --account=def-lemieux1 --nodes=1 --ntasks=1 --cpus-per-task=32 --mem=300G --gpus=h100:1

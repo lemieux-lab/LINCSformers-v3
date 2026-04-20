@@ -1,8 +1,16 @@
 using Flux, ProgressBars, Statistics
 
+function manual_logitcrossentropy(logits, y; dims=1)
+    max_logits = maximum(logits, dims=dims)
+    shifted = logits .- max_logits
+    log_sum_exp = log.(sum(exp.(shifted), dims=dims))
+    log_probs = shifted .- log_sum_exp
+    return -mean(sum(y .* log_probs, dims=dims))
+end
+
 function ce_loss(model, x, x_pca, y, use_pca)
     logits = use_pca ? model(x, x_pca) : model(x)
-    return Flux.logitcrossentropy(logits, y)
+    return manual_logitcrossentropy(logits, y)
 end
 
 function train(model, opt, data, config, logs)
@@ -10,6 +18,7 @@ function train(model, opt, data, config, logs)
     (; epochs, batch_size, loss, use_pca, use_oversmpl, clsdict, cls, freq, save_dir, pt) = config
 
     for epoch in ProgressBar(1:epochs)
+        println("epoch $epoch")
         is_last = (epoch == epochs)
         # is_checkpt = !isnothing(freq) && (epoch % freq == 0 || is_last)
         is_checkpt = (!isnothing(freq) && epoch % freq == 0) || is_last
@@ -55,9 +64,9 @@ function train_epoch!(model, opt, X_train, ytrain, pca_train, loss,
             batch_idx = start_idx:end_idx
         end
 
-        x_gpu = gpu(X_train[:, batch_idx])
-        y_gpu = gpu(ytrain[:, batch_idx])
-        x_pca = use_pca ? gpu(pca_train[:, batch_idx]) : nothing
+        x_gpu = cu(X_train[:, batch_idx])
+        y_gpu = cu(ytrain[:, batch_idx])
+        x_pca = use_pca ? cu(pca_train[:, batch_idx]) : nothing
 
         lv, grads = Flux.withgradient(model) do m
             loss(m, x_gpu, x_pca, y_gpu, use_pca)
@@ -79,9 +88,9 @@ function eval_epoch(model, X_test, y_test, pca_test, use_pca, batch_size, get_pr
         end_idx = min(start_idx + batch_size - 1, n_samples)
         batch_idx = start_idx:end_idx
 
-        x_gpu = gpu(X_test[:, batch_idx])
-        y_gpu = gpu(y_test[:, batch_idx])
-        x_pca = use_pca ? gpu(pca_test[:, batch_idx]) : nothing
+        x_gpu = cu(X_test[:, batch_idx])
+        y_gpu = cu(y_test[:, batch_idx])
+        x_pca = use_pca ? cu(pca_test[:, batch_idx]) : nothing
 
         logits = use_pca ? model(x_gpu, x_pca) : model(x_gpu)
         push!(epoch_losses, Float32(cpu(Flux.logitcrossentropy(logits, y_gpu))))
@@ -92,4 +101,14 @@ function eval_epoch(model, X_test, y_test, pca_test, use_pca, batch_size, get_pr
         end
     end
     return mean(epoch_losses), epoch_preds, epoch_trues
+end
+
+function manual_gpu_transfer(x)
+    if x isa Flux.Dropout
+        return Flux.Dropout(x.p; dims=x.dims, rng=CUDA.default_rng())
+    elseif x isa AbstractArray
+        return cu(x)
+    else
+        return x
+    end
 end

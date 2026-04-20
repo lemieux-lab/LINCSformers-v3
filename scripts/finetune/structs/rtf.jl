@@ -19,9 +19,14 @@ end
 Flux.@layer PosEnc
 Flux.trainable(pe::PosEnc) = NamedTuple()
 
+# function (pe::PosEnc)(input::AbstractArray)
+#     seq_len = size(input,2)
+#     return input .+ @view(pe.pe_matrix[:, 1:seq_len]) # adds positional encoding to input embeddings
+# end
+
 function (pe::PosEnc)(input::AbstractArray)
-    seq_len = size(input,2)
-    return input .+ @view(pe.pe_matrix[:, 1:seq_len]) # adds positional encoding to input embeddings
+    seq_len = size(input, 2)
+    return input .+ pe.pe_matrix[:, 1:seq_len]
 end
 
 ### transformer
@@ -58,19 +63,69 @@ end
 
 Flux.@layer Transf
 
-function (tf::Transf)(input) # input shape: embed_dim × seq_len × batch_size
+function Transf(embed_dim::Int, hidden_dim::Int; n_heads::Int, dropout_prob::Float64)
+    mha = Flux.MultiHeadAttention((embed_dim, embed_dim, embed_dim) => (embed_dim, embed_dim) => embed_dim, nheads=n_heads, dropout_prob=dropout_prob)
+    att_dropout = Flux.Dropout(dropout_prob)
+    att_norm = Flux.LayerNorm(embed_dim)
+    mlp = Flux.Chain(Flux.Dense(embed_dim => hidden_dim, gelu), Flux.Dropout(dropout_prob), Flux.Dense(hidden_dim => embed_dim), Flux.Dropout(dropout_prob))
+    mlp_norm = Flux.LayerNorm(embed_dim)
+    return Transf(mha, att_dropout, att_norm, mlp, mlp_norm)
+end
+
+Flux.@layer Transf
+
+function manual_softmax(x::AbstractArray; dims=1)
+    max_x = maximum(x, dims=dims)
+    exp_x = exp.(x .- max_x)
+    return exp_x ./ sum(exp_x, dims=dims)
+end
+
+function manual_mha(mha::Flux.MultiHeadAttention, x::AbstractArray)
+    q = mha.q_proj(x)
+    k = mha.k_proj(x)
+    v = mha.v_proj(x)
+
+    embed_dim, seq_len, batch = size(q)
+    head_dim = embed_dim ÷ mha.nheads
+    scale = Float32(inv(sqrt(head_dim)))
+
+    q3 = reshape(permutedims(reshape(q, head_dim, mha.nheads, seq_len, batch), (1,3,2,4)), head_dim, seq_len, mha.nheads*batch)
+    k3 = reshape(permutedims(reshape(k, head_dim, mha.nheads, seq_len, batch), (1,3,2,4)), head_dim, seq_len, mha.nheads*batch)
+    v3 = reshape(permutedims(reshape(v, head_dim, mha.nheads, seq_len, batch), (1,3,2,4)), head_dim, seq_len, mha.nheads*batch)
+
+    scores = NNlib.batched_mul(NNlib.batched_adjoint(k3), q3) .* scale
+    α = manual_softmax(scores; dims=1)
+    α = mha.attn_drop(α)
+
+    out3 = NNlib.batched_mul(v3, α)
+    out = reshape(permutedims(reshape(out3, head_dim, seq_len, mha.nheads, batch), (1,3,2,4)), embed_dim, seq_len, batch)
+    return mha.out_proj(out)
+end
+
+function (tf::Transf)(input)
     normed = tf.att_norm(input)
-    atted = tf.mha(normed, normed, normed)[1] # outputs a tuple (a, b)
-    att_dropped = tf.att_dropout(atted)
-    residualed = input + att_dropped
+    atted = manual_mha(tf.mha, normed)
+    residualed = input + tf.att_dropout(atted)
     res_normed = tf.mlp_norm(residualed)
     embed_dim, seq_len, batch_size = size(res_normed)
-    reshaped = reshape(res_normed, embed_dim, seq_len * batch_size) # dense layers expect 2D inputs
-    mlp_out = tf.mlp(reshaped)
-    mlp_out_reshaped = reshape(mlp_out, embed_dim, seq_len, batch_size)
-    tf_output = residualed + mlp_out_reshaped
-    return tf_output
+    reshaped = reshape(res_normed, embed_dim, seq_len * batch_size)
+    mlp_out_reshaped = reshape(tf.mlp(reshaped), embed_dim, seq_len, batch_size)
+    return residualed + mlp_out_reshaped
 end
+
+# function (tf::Transf)(input) # input shape: embed_dim × seq_len × batch_size
+#     normed = tf.att_norm(input)
+#     atted = tf.mha(normed, normed, normed)[1] # outputs a tuple (a, b)
+#     att_dropped = tf.att_dropout(atted)
+#     residualed = input + att_dropped
+#     res_normed = tf.mlp_norm(residualed)
+#     embed_dim, seq_len, batch_size = size(res_normed)
+#     reshaped = reshape(res_normed, embed_dim, seq_len * batch_size) # dense layers expect 2D inputs
+#     mlp_out = tf.mlp(reshaped)
+#     mlp_out_reshaped = reshape(mlp_out, embed_dim, seq_len, batch_size)
+#     tf_output = residualed + mlp_out_reshaped
+#     return tf_output
+# end
 
 ### full model as << ranked data --> token embedding --> position embedding --> transformer --> classifier head >>
 struct Model{E,P,D,T,C}

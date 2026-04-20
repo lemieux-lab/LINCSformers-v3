@@ -66,12 +66,14 @@ function split_data(X, ratio::Float64, y=nothing)
     return X[:, train_idx], y[:, train_idx], X[:, test_idx], y[:, test_idx], train_idx, test_idx
 end
 
-function get_labels(data::Lincs, level::String)
-    X = data.expr
+function get_labels(data::Matrix{Float32}, level::String)
+    X = data
     if level == "lvl1"
-        return X, data.inst.cell_mfc_name, 1:size(X, 2)
+        mfc = load("../../../data/lincs_trt_inst.jld2")["mfc"]
+        return X, mfc, 1:size(X, 2)
     elseif level == "lvl2"
-        y = data.inst.pert_id
+        pert_id = load("../../../data/lincs_trt_inst.jld2")["pert_id"]
+        y = pert_id
         counts = countmap(y)
         valid_labels = Set(k for (k, v) in counts if 1000 < v < 20000) # 7k for testing, 1k for running
         idx = findall(l -> l in valid_labels, y)
@@ -81,7 +83,7 @@ function get_labels(data::Lincs, level::String)
     end
 end
 
-function dsplit(data::Lincs, config::Config)
+function dsplit(data::Matrix{Float32}, config::Config)
     X, y, orig_idx = get_labels(data, config.level)
     
     labels = unique(y)
@@ -110,7 +112,7 @@ function dsplit(data::Lincs, config::Config)
         if config.modeltype in ("v1", "v2")
             raw_train = X[:, train_indices]
             raw_test = X[:, test_indices]
-            pca_train_norm = fit(PCA, Float32.(data.expr[:, pt_indices["train_indices"]]); maxoutdim=config.embed_dim)
+            pca_train_norm = fit(PCA, Float32.(data[:, pt_indices["train_indices"]]); maxoutdim=config.embed_dim)
             pca_info = (norm=pca_train_norm, raw_train=raw_train, raw_test=raw_test)
         end
     end
@@ -232,11 +234,11 @@ function mstate(config::Config, pca_info, use_pca, n_classifications)
                         dropout_prob=config.drop_prob)
 
     if config.modeltype == "rtf"
-        pt_model = Model(; general_model...) |> gpu
+        pt_model = Model(; general_model...) 
     elseif config.modeltype == "v1"
-        pt_model = Model(; general_model..., pca_dim=config.embed_dim, use_pca_proj=false) |> gpu
+        pt_model = Model(; general_model..., pca_dim=config.embed_dim, use_pca_proj=false)
     elseif config.modeltype == "v2"
-        pt_model = Model(; general_model..., pca_dim=config.embed_dim) |> gpu
+        pt_model = Model(; general_model..., pca_dim=config.embed_dim)
     end
 
     Flux.loadmodel!(pt_model, state)
@@ -244,7 +246,7 @@ function mstate(config::Config, pca_info, use_pca, n_classifications)
     ft_model = FTModel(pt_model;
         embed_dim=config.embed_dim,
         hidden_dim=config.hidden_dim,
-        n_classifications=n_classifications) |> gpu
+        n_classifications=n_classifications)
 
     if use_pca && !isnothing(pca_info)
         X_pca_train = Float32.(MultivariateStats.predict(pca_info.norm, Float32.(pca_info.raw_train)))
